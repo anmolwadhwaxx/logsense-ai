@@ -1,0 +1,81 @@
+body {
+    font-family: Arial, sans-serif;
+    margin: 0;
+    padding: 10px;
+    background-color: #f9f9f9;
+}
+
+h1 {
+    font-size: 24px;
+    color: #333;
+}
+
+.network-data {
+    margin-top: 20px;
+}
+
+.network-entry {
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    padding: 10px;
+    margin-bottom: 10px;
+    background-color: #fff;
+}
+
+.network-entry h2 {
+    font-size: 18px;
+    color: #007bff;
+}
+
+.network-entry p {
+    margin: 5px 0;
+    color: #555;
+}
+
+.button {
+    background-color: #007bff;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    padding: 10px 15px;
+    cursor: pointer;
+}
+
+.button:hover {
+    background-color: #0056b3;
+}
+
+
+/* Collapsible section styles */
+.collapsible-section {
+  margin-bottom: 1em;
+  border: 1px solid #ccc;
+  border-radius: 5px;
+}
+
+.collapsible {
+  background-color: #f1f1f1;
+  color: #333;
+  cursor: pointer;
+  padding: 10px;
+  width: 100%;
+  border: none;
+  text-align: left;
+  font-weight: bold;
+  outline: none;
+  font-size: 14px;
+}
+
+.collapsible:hover {
+  background-color: #ddd;
+}
+
+.collapsible-content {
+  padding: 10px;
+  display: none;
+  overflow: auto;
+  background-color: #fff;
+  border-top: 1px solid #ccc;
+  font-family: monospace;
+  white-space: pre-wrap;
+}

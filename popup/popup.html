@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Network Capture</title>
+    <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+    <div id="container">
+        <button id="clear-button">Clear Data</button>
+        <div>
+            <label for="user-utc-offset">UTC Offset (e.g. -0700):</label>
+            <input type="text" id="user-utc-offset" value="-0700" maxlength="6" style="width:70px;">
+            <button id="set-utc-offset">Set</button>
+        </div>
+        <div>
+            <label for="site-selector">Site:</label>
+            <select id="site-selector"></select>
+            <input type="text" id="site-input" placeholder="Enter site URL" style="width:150px;">
+            <button id="add-site">Add Site</button>
+        </div>
+        <div>
+            <label for="side-selector">Side:</label>
+            <select id="side-selector">
+                <option value="Client">Client</option>
+                <option value="Server">Server</option>
+                <option value="Other">Other</option>
+            </select>
+            <input type="text" id="custom-side" placeholder="Custom side" style="display:none;width:100px;">
+        </div>
+		
+		<div class="collapsible-section">
+			<button class="collapsible">Show Environment Info</button>
+			<div class="collapsible-content">
+			  <pre id="env-info">Loading environment info...</pre>
+			</div>
+		</div>
+
+        <h1>Captured Network Requests</h1>
+        <div id="request-list">
+            <!-- Captured requests will be displayed here -->
+        </div>
+        <div id="network-data">
+            <!-- Captured requests will be displayed here -->
+        </div>
+    </div>
+    <script src="popup.js"></script>
+</body>
+</html>
