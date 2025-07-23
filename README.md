@@ -129,7 +129,7 @@ https://alexandria.shs.aws.q2e.io/logs/<SEARCH_STRING>
 With a search string like:
 
 ```spl
-search index="app_logs_prod_hq" sessionId="..." earliest="..." latest="..." | fields * | extract | sort timestamp, seqId | head 10000
+search index="app_logs_{prod/stage}_hq" sessionId="..." earliest="..." latest="..." | fields * | extract | sort timestamp, seqId | head 10000
 ```
 This enables direct log lookup for debugging user sessions.
 
