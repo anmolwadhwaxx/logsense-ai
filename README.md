@@ -121,6 +121,8 @@ No build step is required. The extension is built using vanilla JavaScript and H
 ```
 These permissions are necessary to monitor network traffic, read cookies, and interact with the current tab.
 
+---
+
 # Alexandria HQ URL Example
 For each captured request, a URL is generated in this format:
 ```bash
@@ -133,6 +135,8 @@ search index="app_logs_{prod/stage}_hq" sessionId="..." earliest="..." latest=".
 ```
 This enables direct log lookup for debugging user sessions.
 
+---
+
 # Development Notes
 - `utils/har.js` includes functions to format request/response data into HAR format (can be extended for HAR export).
 - `popup.js` has helper functions to extract, format, and render network request metadata.
@@ -144,3 +148,16 @@ This enables direct log lookup for debugging user sessions.
 [hsolanki](https://gitlab.com/HiteshSingh.solanki)
 - **Ashish Kumar** - Initial work.
 [akumar2](ashish.kumar@q2.com)
+
+## Contributing
+
+We welcome contributions to improve the functionality or fix bugs. To contribute:
+
+1. Fork the repository.
+2. Create a new branch with a descriptive name (e.g. `feature/improve-logging` or `bugfix/env-parser`).
+3. Commit your changes with clear messages.
+4. Before merging, please contact the maintainers.
+
+Reach out to [hsolanki](https://gitlab.com/HiteshSingh.solanki) to discuss your changes or open a merge request.
+
+---
