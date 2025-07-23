@@ -1,93 +1,146 @@
-# Easy Logs
+# Q2 Easy Log
+
+**Q2 Easy Log** is a Chrome extension designed to assist Implemention Engineers by capturing network requests related to Q2 UUX applications. It allows users to inspect request details, extract `q2token`, `workstation-id`, and other key headers, and conveniently generate Alexandria HQ debug log URLs.
+
+---
+
+## Features
+
+- Captures network requests from the active tab.
+- Parses and displays:
+  - Request method, URL, and status
+  - Response time and headers
+  - `q2token` and `workstation-id` from headers or cookies
+  - `fi_no` from CDN deport URLs
+- Collects and displays UUX environment information from the page.
+- Allows users to:
+  - Set custom UTC offset
+  - Manage list of sites
+  - Select the request origin side (Client/Server/Other)
+- Generates direct search URLs for Alexandria HQ logs.
+- Optional floating UI element inside the webpage to fetch network data dynamically.
+
+---
+
+## Folder Structure
+
+    ├── icons/
+    │ └── icon.png
+    ├── popup/
+    │ ├── popup.html
+    │ ├── popup.css
+    │ └── popup.js
+    ├── utils/
+    │ ├── har.js
+    │ └── inject.js
+    ├── background.js
+    ├── content.js
+    ├── manifest.json
+    └── README.md
+
+---
+
+## File Overview
+
+- `popup.html` : Popup UI for displaying network data, sites selector, environment info, and controls.
+
+- `popup.css` : Stylesheet for the popup UI with collapsible sections and responsive layout.
+
+- `popup.js` : Popup logic: site management, environment info requests, display and formatting of captured requests.
+
+- `background.js` : Background script capturing network requests and responses via Chrome `webRequest` API, stores requests, listens for messages.
+
+- `content.js` : Content script injecting `inject.js` into the page to gather environment data and relay it back via messaging.
+
+- `inject.js` : Injected script running in the page context to collect environment info from global objects and cookies, sends data back to content script.
+
+- `har.js` : Utilities for creating HAR logs from captured request/response data (can be extended for exporting HAR files).
 
 
+---
 
-## Getting started
+## How It Works
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+### 1. **Background Service Worker**
+- `background.js` uses Chrome’s `webRequest` API to capture:
+  - Request/response headers
+  - Timestamps
+  - Status codes
+- Stores request data and provides it to the popup or content scripts.
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+### 2. **Popup Interface**
+- `popup.html`, `popup.js`, and `popup.css` power the extension UI.
+- Shows a list of captured network requests and environment metadata.
+- Generates Alexandria HQ log search URLs dynamically based on session and timing data.
 
-## Add your files
+### 3. **Content Script**
+- `content.js` injects a floating button into pages.
+- Communicates with `inject.js` (which runs in the page context) to access global JS variables and cookies (like `Ngam`, `Q2_CONFIG`, etc.).
+- Collects UUX environment details and forwards them to the popup and background.
 
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+### 4. **Script Injection**
+- `inject.js` runs in the page’s JS context.
+- Extracts UUX-specific metadata like:
+  - UUX version
+  - Theme
+  - Language
+  - CDN base URL
+  - Platform/SDK version
+- Sends data back via `window.postMessage`.
 
+---
+
+## Build & Deployment
+
+No build step is required. The extension is built using vanilla JavaScript and HTML/CSS. To install it locally:
+
+### Install in Chrome
+
+1. Clone the repo or download it from GitLab.
+2. Open **chrome://extensions/**
+3. Enable **Developer Mode**
+4. Click **"Load unpacked"**
+5. Select the root folder of the project.
+
+---
+
+## Required Permissions
+
+```json
+"permissions": [
+  "tabs",
+  "storage",
+  "cookies",
+  "scripting",
+  "activeTab",
+  "webRequest"
+],
+"host_permissions": [
+  "<all_urls>"
+]
 ```
-cd existing_repo
-git remote add origin https://gitlab.com/HiteshSingh.solanki/easy-logs.git
-git branch -M main
-git push -uf origin main
+These permissions are necessary to monitor network traffic, read cookies, and interact with the current tab.
+
+# Alexandria HQ URL Example
+For each captured request, a URL is generated in this format:
+```bash
+https://alexandria.shs.aws.q2e.io/logs/<SEARCH_STRING>
 ```
+With a search string like:
 
-## Integrate with your tools
+```spl
+search index="app_logs_prod_hq" sessionId="..." earliest="..." latest="..." | fields * | extract | sort timestamp, seqId | head 10000
+```
+This enables direct log lookup for debugging user sessions.
 
-- [ ] [Set up project integrations](https://gitlab.com/HiteshSingh.solanki/easy-logs/-/settings/integrations)
+# Development Notes
+- `utils/har.js` includes functions to format request/response data into HAR format (can be extended for HAR export).
+- `popup.js` has helper functions to extract, format, and render network request metadata.
+- Content and popup scripts use `chrome.runtime.sendMessage()` for cross-context communication.
+- The UI includes a collapsible panel for viewing environment info in detail.
 
-## Collaborate with your team
-
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
-
-## Test and Deploy
-
-Use the built-in continuous integration in GitLab.
-
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
-
-***
-
-# Editing this README
-
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
-
-## Suggestions for a good README
-
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
-
-## Name
-Choose a self-explaining name for your project.
-
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
-
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
-
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
-
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
-
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
-
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
-
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
-
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
-
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
-
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
-
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
-
-## License
-For open source projects, say how it is licensed.
-
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+## Authors
+- **Hitesh Singh Solanki** - Responsible for maintaining the project as well as implementing updates and new features.
+[hsolanki](https://gitlab.com/HiteshSingh.solanki)
+- **Ashish Kumar** - Initial work.
+[akumar2](ashish.kumar@q2.com)
