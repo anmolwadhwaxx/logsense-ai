@@ -1,87 +1,108 @@
+// Store all captured request data by requestId
 const requests = {};
 
-// Helper to extract fi_no from URL
+// Store latest environment info sent from content script
+let cachedEnvInfo = null;
+
+// --- Helper function ---
+
+// Extract `fi_no` from the request URL (used for CDN deport pattern)
 function extractFiNo(url) {
   const match = url.match(/cdn\/deport\/([^/]+)/);
   return match ? match[1] : null;
 }
 
-// Capture request details
+// --- Web Request Listeners ---
+
+// Capture initial request details
 chrome.webRequest.onBeforeRequest.addListener(
   (details) => {
+    // Initialize tracking for this request
     requests[details.requestId] = {
       requestId: details.requestId,
       url: details.url,
       method: details.method,
       startTime: details.timeStamp,
-      requestBody: details.requestBody || null,
       fi_no: extractFiNo(details.url)
     };
   },
-  { urls: ["<all_urls>"] },
-  ["requestBody"]
+  { urls: ["<all_urls>"] } // Listen to all URLs
 );
 
-// Capture request headers and tokens
+// Capture request headers to extract q2token, workstation-id, utcOffset
 chrome.webRequest.onBeforeSendHeaders.addListener(
   (details) => {
-    if (requests[details.requestId]) {
-      requests[details.requestId].requestHeaders = details.requestHeaders;
+    const req = requests[details.requestId];
+    if (req) {
+      req.requestHeaders = details.requestHeaders;
 
-      // Extract q2token and workstation-id from headers
+      // Extract q2token from headers
       const q2tokenHeader = details.requestHeaders.find(h => h.name.toLowerCase() === 'q2token');
-      requests[details.requestId].q2token = q2tokenHeader ? q2tokenHeader.value : null;
+      req.q2token = q2tokenHeader?.value || null;
 
       // Extract from Cookie header
       const cookieHeader = details.requestHeaders.find(h => h.name.toLowerCase() === 'cookie');
-      if (cookieHeader && cookieHeader.value) {
+      if (cookieHeader?.value) {
         // Extract workstation-id from cookie string
         const matchWorkstationId = cookieHeader.value.match(/(?:^|;\s*)workstation-id=([^;]*)/i);
         if (matchWorkstationId) {
-          requests[details.requestId].workstationId = matchWorkstationId[1];
+          req.workstationId = matchWorkstationId[1];
         }
-        // Extract utcOffset from cookie string
+
+        // Extract utcOffset (e.g. +0000) from cookie
         const matchUtcOffset = cookieHeader.value.match(/(?:^|;\s*)utcOffset=([-+]\d{4})/i);
         if (matchUtcOffset) {
-          requests[details.requestId].utcOffset = matchUtcOffset[1];
+          req.utcOffset = matchUtcOffset[1];
         }
       }
     }
   },
   { urls: ["<all_urls>"] },
-  ["requestHeaders"]
+  ["requestHeaders"] // Required to access request headers
 );
 
-// Capture response headers
+// Capture response headers for the request
 chrome.webRequest.onHeadersReceived.addListener(
   (details) => {
-    if (requests[details.requestId]) {
-      requests[details.requestId].responseHeaders = details.responseHeaders;
+    const req = requests[details.requestId];
+    if (req) {
+      req.responseHeaders = details.responseHeaders;
     }
   },
   { urls: ["<all_urls>"] },
-  ["responseHeaders"]
+  ["responseHeaders"] // Required to access response headers
 );
 
-// Capture response details
+// Capture when request is completed to store status and end time
 chrome.webRequest.onCompleted.addListener(
   (details) => {
-    if (requests[details.requestId]) {
-      requests[details.requestId].statusCode = details.statusCode;
-      requests[details.requestId].endTime = details.timeStamp;
+    const req = requests[details.requestId];
+    if (req) {
+      req.statusCode = details.statusCode;
+      req.endTime = details.timeStamp;
     }
   },
   { urls: ["<all_urls>"] }
 );
 
-// Respond to popup/content script requests for captured data or clearing data
+// --- Message Listener (handles messages from popup or content script) ---
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  // Return captured network data to popup
   if (message.action === 'getNetworkData') {
     sendResponse({ data: Object.values(requests) });
+
+  // Clear all captured request data
   } else if (message.action === 'clearNetworkData') {
-    for (const key in requests) {
-      delete requests[key];
-    }
+    for (const key in requests) delete requests[key];
     sendResponse({ success: true });
+
+  // Cache environment info sent by content script
+  } else if (message.type === 'UUX_ENV_INFO') {
+    cachedEnvInfo = message.data;
+    sendResponse({ success: true });
+
+  // Provide cached env info when popup requests it
+  } else if (message.type === 'GET_CACHED_ENV_INFO') {
+    sendResponse({ data: cachedEnvInfo });
   }
 });
