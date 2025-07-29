@@ -17,8 +17,14 @@
   - Set custom UTC offset
   - Manage list of sites
   - Select the request origin side (Client/Server/Other)
-- Generates direct search URLs for Alexandria HQ logs.
-- Optional floating UI element inside the webpage to fetch network data dynamically.
+- Generates direct search URLs for multiple Alexandria log platforms:
+  - **Alexandria HQ Logs** - Session-based debugging
+  - **Alexandria LightBridge Logs** - Workstation-based debugging  
+  - **Alexandria Kamino Logs** - Additional session tracking
+- Auto-detects staging vs production environments for accurate log indexing
+- Optional floating UI element inside the webpage to fetch network data dynamically
+- Enhanced UI with improved text wrapping and collapsible sections
+- User Info section for future functionality expansion
 
 ---
 
@@ -69,9 +75,12 @@
 - Stores request data and provides it to the popup or content scripts.
 
 ### 2. **Popup Interface**
+
 - `popup.html`, `popup.js`, and `popup.css` power the extension UI.
 - Shows a list of captured network requests and environment metadata.
-- Generates Alexandria HQ log search URLs dynamically based on session and timing data.
+- Generates Alexandria log search URLs for HQ, LightBridge, and Kamino platforms.
+- Features enhanced UI with improved text wrapping and collapsible environment info section.
+- Includes User Info section and download functionality for future enhancements.
 
 ### 3. **Content Script**
 - `content.js` injects a floating button into pages.
@@ -123,27 +132,53 @@ These permissions are necessary to monitor network traffic, read cookies, and in
 
 ---
 
-# Alexandria HQ URL Example
-For each captured request, a URL is generated in this format:
+## Alexandria Log URLs
+
+For each captured request, URLs are generated for multiple Alexandria log platforms:
+
+### HQ Logs
 ```bash
 https://alexandria.shs.aws.q2e.io/logs/<SEARCH_STRING>
 ```
-With a search string like:
 
-```spl
-search index="app_logs_{prod/stage}_hq" sessionId="..." earliest="..." latest="..." | fields * | extract | sort timestamp, seqId | head 10000
+### LightBridge Logs  
+```bash
+https://alexandria.shs.aws.q2e.io/logs/<LIGHTBRIDGE_SEARCH_STRING>
 ```
-This enables direct log lookup for debugging user sessions.
+
+### Kamino Logs
+```bash
+https://alexandria.shs.aws.q2e.io/logs/<KAMINO_SEARCH_STRING>
+```
+
+Search strings are automatically generated with the following format:
+
+**HQ & Kamino (Session-based):**
+```spl
+search index="app_logs_{prod/stage}_{hq/kamino}" sessionId="..." earliest="..." latest="..." | fields * | extract | sort timestamp, seqId | head 10000
+```
+
+**LightBridge (Workstation-based):**
+```spl
+search index="app_logs_{prod/stage}_lightbridge" workstationId="..." earliest="..." latest="..." | fields * | extract | sort timestamp, seqId | head 10000
+```
+
+This enables comprehensive log lookup across all Q2 platforms for debugging user sessions.
 
 ---
 
-# Development Notes
+## Development Notes
+
 - `utils/har.js` includes functions to format request/response data into HAR format (can be extended for HAR export).
-- `popup.js` has helper functions to extract, format, and render network request metadata.
+- `popup.js` has helper functions to extract, format, and render network request metadata with support for multiple log platforms.
 - Content and popup scripts use `chrome.runtime.sendMessage()` for cross-context communication.
-- The UI includes a collapsible panel for viewing environment info in detail.
+- The UI includes a collapsible panel for viewing environment info in detail with enhanced styling.
+- Enhanced CSS styling provides better text wrapping and improved readability for long URLs and text content.
+
+---
 
 ## Authors
+
 - **Hitesh Singh Solanki** - Responsible for maintaining the project as well as implementing updates and new features.
 [hsolanki](https://gitlab.com/HiteshSingh.solanki)
 - **Ashish Kumar** - Initial work.
@@ -159,5 +194,3 @@ We welcome contributions to improve the functionality or fix bugs. To contribute
 4. Before merging, please contact the maintainers.
 
 Reach out to [hsolanki](https://gitlab.com/HiteshSingh.solanki) to discuss your changes or open a merge request.
-
----
