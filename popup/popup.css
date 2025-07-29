@@ -20,6 +20,12 @@ h1 {
     padding: 10px;
     margin-bottom: 10px;
     background-color: #fff;
+	/* allow breaking words to wrap */
+	overflow-wrap: break-word; /* modern */
+	word-wrap: break-word;     /* legacy */
+	word-break: break-all;     /* force break if needed */
+	/* make sure the text can wrap normally */
+	white-space: normal;
 }
 
 .network-entry h2 {
@@ -48,7 +54,7 @@ h1 {
 
 /* Collapsible section styles */
 .collapsible-section {
-  margin-bottom: 1em;
+  margin: 1em 1em 1em 0;
   border: 1px solid #ccc;
   border-radius: 5px;
 }
@@ -71,11 +77,18 @@ h1 {
 }
 
 .collapsible-content {
-  padding: 10px;
+  padding: 0px 10px;
   display: none;
   overflow: auto;
   background-color: #fff;
-  border-top: 1px solid #ccc;
   font-family: monospace;
   white-space: pre-wrap;
+  line-height: 1.1;
+  overflow-y: hidden;
+  font-size: 1.2em;
+}
+
+.collapsible-content * {
+  margin: 0;
+  padding: 0;
 }

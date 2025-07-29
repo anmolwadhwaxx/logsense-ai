@@ -47,19 +47,19 @@ document.addEventListener('DOMContentLoaded', function () {
 
   // Renders environment information into the popup's env info element
   function renderEnvInfo(info) {
-    envInfoEl.textContent = `
-**** UUX Info ****
-Version: ${info.version}
-Theme: ${info.theme}
-Language: ${info.language}
+    envInfoEl.innerHTML = `
+<strong>**** UUX Info ****</strong>
+<strong>Version</strong>: ${info.version}
+<strong>Theme</strong>: ${info.theme}
+<strong>Language</strong>: ${info.language}
 
 **** Tecton Info ****
-Platform Version: ${info.tectonPlatformVersion}
-SDK Version: ${info.tectonSdkVersion}
+<strong>Platform Version</strong>: ${info.tectonPlatformVersion}
+<strong>SDK Version</strong>: ${info.tectonSdkVersion}
 
 **** CDN Info ****
-Base URL: ${info.cdnBaseUrl}
-Customer #: ${info.cdnCustomerNumber}
+<strong>Base URL</strong>: ${info.cdnBaseUrl}
+<strong>Customer #</strong>: ${info.cdnCustomerNumber}
     `;
   }
 
@@ -224,6 +224,12 @@ Customer #: ${info.cdnCustomerNumber}
             const logIndex = url.includes('temporary') ? 'app_logs_stage_hq' : 'app_logs_prod_hq';
             const searchString = `search index="${logIndex}"  sessionId="${q2token}"  earliest="${formattedStart}" latest="${formattedEnd}" | fields * | extract | sort timestamp, seqId | head 10000`;
             const fullUrl = `https://alexandria.shs.aws.q2e.io/logs/${encodeURIComponent(searchString)}`;
+			const lbLogIndex = url.includes('temporary') ? 'app_logs_stage_lightbridge' : 'app_logs_prod_lightbridge';
+			const lbSearchString = `search index="${lbLogIndex}"  workstationId="${workstationId}"  earliest="${formattedStart}" latest="${formattedEnd}" | fields * | extract | sort timestamp, seqId | head 10000`;
+			const lbUrl = `https://alexandria.shs.aws.q2e.io/logs/${encodeURIComponent(lbSearchString)}`
+			const kaminoLogIndex = url.includes('temporary') ? 'app_logs_stage_kamino' : 'app_logs_prod_kamino';
+			const kaminoSearchString = `search index="${kaminoLogIndex}"  sessionId="${q2token}"  earliest="${formattedStart}" latest="${formattedEnd}" | fields * | extract | sort timestamp, seqId | head 10000`;
+			const kaminoUrl = `https://alexandria.shs.aws.q2e.io/logs/${encodeURIComponent(kaminoSearchString)}`
 
             // Build HTML block for this network entry
             const entryElement = document.createElement('div');
@@ -238,10 +244,14 @@ Customer #: ${info.cdnCustomerNumber}
               <strong>fi_no:</strong> ${fi_no}<br>
               <strong>Start Time:</strong> ${formattedStart} GMT<br>
               <strong>End Time (30 min later):</strong> ${formattedEnd} GMT<br>
-              <strong>Search String:</strong><br>
+              <strong>HQ Search String:</strong><br>
               <code style="word-break:break-all;">${searchString}</code><br>
               <strong>Alexandria HQ Logs URL:</strong><br>
-              <a href="${fullUrl}" target="_blank">${fullUrl}</a>
+              <a href="${fullUrl}" target="_blank">${fullUrl}</a><br>
+			  <strong>Alexandria LightBridge Logs URL:</strong><br>
+              <a href="${lbUrl}" target="_blank">${lbUrl}</a><br>
+			  <strong>Alexandria Kamino Logs URL:</strong><br>
+              <a href="${kaminoUrl}" target="_blank">${kaminoUrl}</a>
               <hr>
             `;
             networkDataContainer.appendChild(entryElement);
