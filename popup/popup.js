@@ -224,12 +224,15 @@ document.addEventListener('DOMContentLoaded', function () {
             const logIndex = url.includes('temporary') ? 'app_logs_stage_hq' : 'app_logs_prod_hq';
             const searchString = `search index="${logIndex}"  sessionId="${q2token}"  earliest="${formattedStart}" latest="${formattedEnd}" | fields * | extract | sort timestamp, seqId | head 10000`;
             const fullUrl = `https://alexandria.shs.aws.q2e.io/logs/${encodeURIComponent(searchString)}`;
-			const lbLogIndex = url.includes('temporary') ? 'app_logs_stage_lightbridge' : 'app_logs_prod_lightbridge';
-			const lbSearchString = `search index="${lbLogIndex}"  workstationId="${workstationId}"  earliest="${formattedStart}" latest="${formattedEnd}" | fields * | extract | sort timestamp, seqId | head 10000`;
-			const lbUrl = `https://alexandria.shs.aws.q2e.io/logs/${encodeURIComponent(lbSearchString)}`
-			const kaminoLogIndex = url.includes('temporary') ? 'app_logs_stage_kamino' : 'app_logs_prod_kamino';
-			const kaminoSearchString = `search index="${kaminoLogIndex}"  sessionId="${q2token}"  earliest="${formattedStart}" latest="${formattedEnd}" | fields * | extract | sort timestamp, seqId | head 10000`;
-			const kaminoUrl = `https://alexandria.shs.aws.q2e.io/logs/${encodeURIComponent(kaminoSearchString)}`
+            const lbLogIndex = url.includes('temporary') ? 'app_logs_stage_lightbridge' : 'app_logs_prod_lightbridge';
+            const lbSearchString = `search index="${lbLogIndex}"  workstationId="${workstationId}"  earliest="${formattedStart}" latest="${formattedEnd}" | fields * | extract | sort timestamp, seqId | head 10000`;
+            const lbUrl = `https://alexandria.shs.aws.q2e.io/logs/${encodeURIComponent(lbSearchString)}`
+            const kaminoLogIndex = url.includes('temporary') ? 'app_logs_stage_kamino' : 'app_logs_prod_kamino';
+            const kaminoSearchString = `search index="${kaminoLogIndex}"  sessionId="${q2token}"  earliest="${formattedStart}" latest="${formattedEnd}" | fields * | extract | sort timestamp, seqId | head 10000`;
+            const kaminoUrl = `https://alexandria.shs.aws.q2e.io/logs/${encodeURIComponent(kaminoSearchString)}`
+            const ardentLogIndex = url.includes('temporary') ? 'app_logs_stage_ardent' : 'app_logs_prod_ardent';
+            const ardentSearchString = `search index="${ardentLogIndex}"  workstationId="${workstationId}" earliest="-15m" | fields * | extract | sort timestamp, seqId | head 10000`;
+            const ardentUrl = `https://alexandria.shs.aws.q2e.io/logs/${encodeURIComponent(ardentSearchString)}`
 
             // Build HTML block for this network entry
             const entryElement = document.createElement('div');
@@ -246,13 +249,13 @@ document.addEventListener('DOMContentLoaded', function () {
               <strong>End Time (30 min later):</strong> ${formattedEnd} GMT<br>
               <strong>HQ Search String:</strong><br>
               <code style="word-break:break-all;">${searchString}</code><br>
-              <strong>Alexandria HQ Logs URL:</strong><br>
-              <a href="${fullUrl}" target="_blank">${fullUrl}</a><br>
-			  <strong>Alexandria LightBridge Logs URL:</strong><br>
-              <a href="${lbUrl}" target="_blank">${lbUrl}</a><br>
-			  <strong>Alexandria Kamino Logs URL:</strong><br>
-              <a href="${kaminoUrl}" target="_blank">${kaminoUrl}</a>
-              <hr>
+              <div class="log-buttons">
+                <a href="${fullUrl}" target="_blank" class="log-button hq-log">HQ Logs</a>
+                <a href="${lbUrl}" target="_blank" class="log-button lb-log">LightBridge Logs</a>
+                <a href="${kaminoUrl}" target="_blank" class="log-button kamino-log">Kamino Logs</a>
+                <a href="${ardentUrl}" target="_blank" class="log-button ardent-log">Ardent Logs</a>
+              </div>
+            <hr>
             `;
             networkDataContainer.appendChild(entryElement);
           });

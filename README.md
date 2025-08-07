@@ -21,7 +21,10 @@
   - **Alexandria HQ Logs** - Session-based debugging
   - **Alexandria LightBridge Logs** - Workstation-based debugging  
   - **Alexandria Kamino Logs** - Additional session tracking
+  - **Alexandria Ardent Logs** - Workstation-based with 15-minute window
 - Auto-detects staging vs production environments for accurate log indexing
+- Color-coded interactive log buttons for easy platform identification
+- Responsive UI with enhanced text wrapping and collapsible sections
 - Optional floating UI element inside the webpage to fetch network data dynamically
 - Enhanced UI with improved text wrapping and collapsible sections
 - User Info section for future functionality expansion
@@ -78,8 +81,10 @@
 
 - `popup.html`, `popup.js`, and `popup.css` power the extension UI.
 - Shows a list of captured network requests and environment metadata.
-- Generates Alexandria log search URLs for HQ, LightBridge, and Kamino platforms.
-- Features enhanced UI with improved text wrapping and collapsible environment info section.
+- Generates Alexandria log search URLs for HQ, LightBridge, Kamino, and Ardent platforms.
+- Features enhanced UI with color-coded interactive log buttons for easy platform identification.
+- Improved text wrapping and collapsible environment info section for better usability.
+- Responsive flexbox layout that adapts to different popup sizes.
 - Includes User Info section and download functionality for future enhancements.
 
 ### 3. **Content Script**
@@ -151,6 +156,11 @@ https://alexandria.shs.aws.q2e.io/logs/<LIGHTBRIDGE_SEARCH_STRING>
 https://alexandria.shs.aws.q2e.io/logs/<KAMINO_SEARCH_STRING>
 ```
 
+### Ardent Logs
+```bash
+https://alexandria.shs.aws.q2e.io/logs/<ARDENT_SEARCH_STRING>
+```
+
 Search strings are automatically generated with the following format:
 
 **HQ & Kamino (Session-based):**
@@ -158,10 +168,12 @@ Search strings are automatically generated with the following format:
 search index="app_logs_{prod/stage}_{hq/kamino}" sessionId="..." earliest="..." latest="..." | fields * | extract | sort timestamp, seqId | head 10000
 ```
 
-**LightBridge (Workstation-based):**
+**LightBridge & Ardent (Workstation-based):**
 ```spl
-search index="app_logs_{prod/stage}_lightbridge" workstationId="..." earliest="..." latest="..." | fields * | extract | sort timestamp, seqId | head 10000
+search index="app_logs_{prod/stage}_{lightbridge/ardent}" workstationId="..." earliest="..." latest="..." | fields * | extract | sort timestamp, seqId | head 10000
 ```
+
+**Note:** Ardent logs use a 15-minute time window (`earliest="-15m"`) instead of the 30-minute window used by other platforms.
 
 This enables comprehensive log lookup across all Q2 platforms for debugging user sessions.
 
@@ -174,6 +186,12 @@ This enables comprehensive log lookup across all Q2 platforms for debugging user
 - Content and popup scripts use `chrome.runtime.sendMessage()` for cross-context communication.
 - The UI includes a collapsible panel for viewing environment info in detail with enhanced styling.
 - Enhanced CSS styling provides better text wrapping and improved readability for long URLs and text content.
+- Color-coded log buttons provide intuitive access to different Alexandria platforms:
+  - HQ Logs: Blue (#007BFF)
+  - LightBridge Logs: Green (#28A745)
+  - Kamino Logs: Gray (#6C757D)
+  - Ardent Logs: Red (#DC3545)
+- Responsive button layout adapts to different popup sizes with flexbox design.
 
 ---
 
