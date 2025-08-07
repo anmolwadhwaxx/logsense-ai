@@ -92,3 +92,46 @@ h1 {
   margin: 0;
   padding: 0;
 }
+
+
+/* Log Buttons */
+
+.log-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.log-button {
+  flex: 1 1 200px;
+  text-align: center;
+  padding: 10px 15px;
+  text-decoration: none;
+  color: white;
+  border-radius: 5px;
+  display: inline-block;
+  font-weight: bold;
+  transition: background-color 0.2s ease;
+}
+
+/* Specific log colors */
+.hq-log {
+  background-color: #007BFF;
+}
+
+.lb-log {
+  background-color: #28A745;
+}
+
+.kamino-log {
+  background-color: #6C757D;
+}
+
+.ardent-log {
+  background-color: #DC3545;
+}
+
+.log-button:hover {
+  opacity: 0.85;
+}
