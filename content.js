@@ -40,7 +40,8 @@ Object.assign(button.style, {
   color: '#fff',
   border: 'none',
   borderRadius: '5px',
-  cursor: 'pointer'
+  cursor: 'pointer',
+  display: 'none'
 });
 button.textContent = 'Fetch Network Data';
 
