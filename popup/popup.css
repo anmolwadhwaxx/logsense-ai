@@ -3,11 +3,55 @@ body {
     margin: 0;
     padding: 10px;
     background-color: #f9f9f9;
+    width: 400px;
+    min-width: 400px;
+    max-width: 400px;
+    min-height: 500px;
+    box-sizing: border-box;
+    opacity: 1;
+    overflow-x: hidden;
+}
+
+/* Prevent flickering during load */
+#container {
+    opacity: 1;
+    width: 100%;
+    max-width: 100%;
+}
+
+#container.loading {
+    opacity: 0.9;
+}
+
+/* Stable containers to prevent layout shift */
+#session-summary, #network-data {
+  min-height: 50px;
+  contain: layout style;
+}
+
+/* Prevent any animations or transitions that could cause flickering */
+*, *::before, *::after {
+  transition: none !important;
+  animation: none !important;
+  transform: none !important;
 }
 
 h1 {
     font-size: 24px;
     color: #333;
+    margin: 10px 0;
+}
+
+h2 {
+    font-size: 18px;
+    color: #333;
+    margin: 15px 0 10px 0;
+}
+
+#container {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
 }
 
 .network-data {
@@ -47,45 +91,105 @@ h1 {
     cursor: pointer;
 }
 
-.button:hover {
-    background-color: #0056b3;
-}
-
 
 /* Collapsible section styles */
 .collapsible-section {
-  margin: 1em 1em 1em 0;
-  border: 1px solid #ccc;
-  border-radius: 5px;
+  margin: 1em 0;
+  padding: 15px;
+  border: 2px solid #007bff;
+  border-radius: 8px;
+  background-color: #f8f9fa;
+  contain: layout style;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
 }
 
 .collapsible {
-  background-color: #f1f1f1;
-  color: #333;
+  background-color: transparent;
+  color: #007bff;
   cursor: pointer;
-  padding: 10px;
+  padding: 0;
+  margin: 0;
   width: 100%;
   border: none;
   text-align: left;
-  font-weight: bold;
+  font-weight: 600;
   outline: none;
-  font-size: 14px;
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
-.collapsible:hover {
-  background-color: #ddd;
+.collapsible::after {
+  content: '▼';
+  font-size: 12px;
+  color: #007bff;
+}
+
+.collapsible.active::after {
+  content: '▲';
 }
 
 .collapsible-content {
-  padding: 0px 10px;
+  padding: 0;
   display: none;
   overflow: auto;
-  background-color: #fff;
-  font-family: monospace;
-  white-space: pre-wrap;
-  line-height: 1.1;
-  overflow-y: hidden;
-  font-size: 1.2em;
+  background-color: white;
+  max-height: 400px;
+  border-radius: 5px;
+  border: 1px solid #ddd;
+  margin-top: 15px;
+  contain: layout style;
+}
+
+.collapsible-content.env-info {
+  font-family: Arial, sans-serif;
+  white-space: normal;
+  line-height: 1.4;
+  font-size: 14px;
+  padding: 15px;
+  background-color: white;
+}
+
+.collapsible-content.env-info pre {
+  margin: 0;
+  padding: 0;
+  background: none;
+  border: none;
+  color: #333;
+  font-family: Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+/* Environment Info Section Styling */
+.env-section {
+  margin-bottom: 8px;
+}
+
+.env-section-title {
+  color: #007bff;
+  font-weight: bold;
+  font-size: 16px;
+  margin-bottom: 4px;
+}
+
+.env-section-content {
+  margin-left: 8px;
+}
+
+.env-info-item {
+  margin-bottom: 2px;
+}
+
+.env-info-label {
+  font-weight: 600;
+  color: #495057;
+}
+
+.env-info-value {
+  color: #333;
 }
 
 .collapsible-content * {
@@ -93,26 +197,92 @@ h1 {
   padding: 0;
 }
 
+/* Individual Request Collapsible Section */
+.collapsible-section .collapsible-content:not(.env-info) {
+  padding: 15px;
+}
+
+/* Form Elements */
+select, input[type="text"] {
+  padding: 8px 12px;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  font-size: 14px;
+  margin: 2px;
+  box-sizing: border-box;
+}
+
+button {
+  padding: 8px 16px;
+  background-color: #007bff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  margin: 2px;
+}
+
+/* Form Layout */
+.form-row {
+  display: flex;
+  align-items: center;
+  margin: 8px 0;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.form-row label {
+  font-weight: 600;
+  color: #495057;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+/* Responsive adjustments */
+@media (max-width: 500px) {
+  body {
+    width: 100vw;
+    min-width: 320px;
+  }
+  
+  .summary-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .log-buttons {
+    grid-template-columns: 1fr;
+    grid-template-rows: repeat(4, 1fr);
+  }
+}
+
 
 /* Log Buttons */
 
 .log-buttons {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 1rem;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 12px;
   margin-top: 1rem;
+  width: 100%;
 }
 
 .log-button {
-  flex: 1 1 200px;
+  width: 100%;
   text-align: center;
-  padding: 10px 15px;
+  padding: 12px 16px;
   text-decoration: none;
   color: white;
-  border-radius: 5px;
+  border-radius: 8px;
   display: inline-block;
   font-weight: bold;
-  transition: background-color 0.2s ease;
+  font-size: 14px;
+  box-sizing: border-box;
+  min-height: 45px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 /* Specific log colors */
@@ -132,6 +302,105 @@ h1 {
   background-color: #DC3545;
 }
 
-.log-button:hover {
-  opacity: 0.85;
+/* Session Summary Container */
+.session-summary-container {
+  margin: 1em 0;
+  padding: 15px;
+  border: 2px solid #007bff;
+  border-radius: 8px;
+  background-color: #f8f9fa;
+  contain: layout style;
+}
+
+.session-summary-container h2 {
+  margin-top: 0;
+  color: #007bff;
+  font-size: 18px;
+  margin-bottom: 15px;
+}
+
+/* Hide the container when empty */
+.session-summary-container.hidden {
+  display: none;
+}
+
+.session-summary {
+  background-color: white;
+  padding: 15px;
+  border-radius: 5px;
+  border: 1px solid #ddd;
+  margin-bottom: 15px;
+  min-height: 200px; /* Prevent layout shift during loading */
+  contain: layout style; /* CSS containment */
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.summary-item {
+  display: flex;
+  flex-direction: column;
+  padding: 8px;
+  background-color: #f8f9fa;
+  border-radius: 4px;
+  border: 1px solid #e9ecef;
+}
+
+.summary-label {
+  font-weight: bold;
+  color: #495057;
+  font-size: 11px;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.summary-value {
+  color: #007bff;
+  font-family: monospace;
+  word-break: break-all;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.3;
+}
+
+/* Individual Request Styles */
+.request-item {
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  padding: 12px;
+  margin-bottom: 10px;
+  background-color: #ffffff;
+  font-size: 13px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.request-item .request-url {
+  font-weight: bold;
+  color: #007bff;
+  word-break: break-all;
+  margin-bottom: 8px;
+  font-size: 14px;
+  line-height: 1.4;
+  padding: 4px 0;
+}
+
+.request-item .request-details {
+  color: #555;
+  font-family: monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  background-color: #f8f9fa;
+  padding: 8px;
+  border-radius: 4px;
+  border-left: 3px solid #007bff;
+}
+
+.request-item .request-details strong {
+  color: #333;
+  font-weight: 600;
 }

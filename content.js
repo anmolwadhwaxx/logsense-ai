@@ -138,4 +138,39 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     return true; // Required to keep the message channel open for async response
   }
+  
+  if (message.type === 'GET_FULL_HAR_DATA') {
+    console.log('[content.js] RECEIVED GET_FULL_HAR_DATA from popup');
+    
+    // Request network data from background and enhance with response bodies
+    chrome.runtime.sendMessage({ action: 'getNetworkData' }, response => {
+      if (response?.data) {
+        // Try to capture response bodies using fetch interception
+        enhanceNetworkDataWithBodies(response.data, sendResponse);
+      } else {
+        sendResponse({ data: [] });
+      }
+    });
+
+    return true; // Required to keep the message channel open for async response
+  }
 });
+
+/**
+ * Enhance network data with response bodies for full HAR export
+ */
+function enhanceNetworkDataWithBodies(networkData, callback) {
+  // For now, return the data as-is since capturing response bodies 
+  // requires more complex interception that might affect page performance
+  // In the future, this could be enhanced with fetch/XMLHttpRequest interception
+  console.log('[content.js] enhancing network data for HAR export');
+  
+  const enhancedData = networkData.map(entry => ({
+    ...entry,
+    responseBody: '', // Would need fetch interception to capture this
+    requestBody: entry.postData || ''
+  }));
+  
+  callback({ data: enhancedData });
+}
+

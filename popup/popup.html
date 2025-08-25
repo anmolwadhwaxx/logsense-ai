@@ -8,19 +8,23 @@
 </head>
 <body>
     <div id="container">
-        <button id="clear-button">Clear Data</button>
-        <div>
-            <label for="user-utc-offset">UTC Offset (e.g. -0700):</label>
+        <div class="form-row">
+            <button id="clear-button">Clear Data</button>
+        </div>
+        <div class="form-row">
+            <label for="user-utc-offset">UTC Offset:</label>
             <input type="text" id="user-utc-offset" value="-0700" maxlength="6" style="width:70px;">
             <button id="set-utc-offset">Set</button>
         </div>
-        <div>
+        <div class="form-row">
             <label for="site-selector">Site:</label>
-            <select id="site-selector"></select>
-            <input type="text" id="site-input" placeholder="Enter site URL" style="width:150px;">
+            <select id="site-selector" style="flex: 1; min-width: 150px;"></select>
+        </div>
+        <div class="form-row">
+            <input type="text" id="site-input" placeholder="Enter site URL" style="flex: 1;">
             <button id="add-site">Add Site</button>
         </div>
-        <div>
+        <div class="form-row">
             <label for="side-selector">Side:</label>
             <select id="side-selector">
                 <option value="Client">Client</option>
@@ -32,21 +36,31 @@
 		
 		<div class="collapsible-section">
 			<button class="collapsible">Show Environment Info</button>
-			<div class="collapsible-content">
+			<div class="collapsible-content env-info">
 			  <pre id="env-info">Loading environment info...</pre>
 			</div>
 		</div>
 
-        <h1>Captured Network Requests</h1>
-        <div id="request-list">
-            <!-- Captured requests will be displayed here -->
-        </div>
-        <div id="network-data">
-            <!-- Captured requests will be displayed here -->
-        </div>
-		<h2>User Info</h2>
-		<div id="user-info-container">Waiting for user data...</div>
-		<button id="download-json">Download Full JSON</button>
+		<!-- Session Summary Container -->
+		<div class="session-summary-container">
+			<h2>Session Summary</h2>
+			<div id="session-summary">
+				<!-- Session summary will be displayed here -->
+			</div>
+		</div>
+
+		<!-- Expandable Request Details -->
+		<div class="collapsible-section">
+			<button class="collapsible">Show Individual Requests</button>
+			<div class="collapsible-content">
+				<div id="network-data">
+					<!-- Individual requests will be displayed here -->
+				</div>
+			</div>
+		</div>
+
+		<h2>Actions</h2>
+		<button id="download-json">Download Full HAR Log</button>
     </div>
     <script src="popup.js"></script>
 </body>
