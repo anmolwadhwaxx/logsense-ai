@@ -135,35 +135,77 @@ function initializePopup() {
   function createDataHash(data) {
     if (!data || data.length === 0) return 'empty';
     
-    // Create a simple hash based on the number of requests and latest timestamp
+    // Create a hash based on all relevant requests including logonUser captures
     const relevantData = data
-      .filter(entry => entry.q2token && entry.q2token !== 'N/A')
-      .map(entry => `${entry.requestId}-${entry.startTime}-${entry.q2token}`)
+      .filter(entry => (entry.q2token && entry.q2token !== 'N/A') || entry.isLogonUserCapture)
+      .map(entry => `${entry.requestId}-${entry.startTime}-${entry.q2token || 'logon'}-${entry.isLogonUserCapture || false}`)
       .join('|');
     
-    return relevantData || 'no-valid-data';
+    // Also include a count of total relevant requests to detect session changes
+    const totalRelevantCount = data.filter(entry => 
+      (entry.q2token && entry.q2token !== 'N/A') || entry.isLogonUserCapture
+    ).length;
+    
+    // Include the latest session ID to detect session changes
+    const latestSessionId = data
+      .filter(entry => entry.q2token && entry.q2token !== 'N/A')
+      .sort((a, b) => (b.startTime || 0) - (a.startTime || 0))[0]?.q2token || 'no-session';
+    
+    return `${relevantData}-count:${totalRelevantCount}-session:${latestSessionId}` || 'no-valid-data';
   }
   function createSessionSummary(data, activeDomain) {
     if (!data || data.length === 0) return null;
 
-    // Filter relevant requests with q2token
+    console.log('[popup.js] createSessionSummary input:', {
+      totalData: data.length,
+      activeDomain: activeDomain,
+      logonUserEntries: data.filter(r => r.isLogonUserCapture).length,
+      logonUserUrls: data.filter(r => r.url?.includes('logonUser')).map(r => ({ url: r.url, domain: getDomain(r.url) }))
+    });
+
+    // Filter relevant requests with q2token OR logonUser captures
     const relevantRequests = data
-      .filter(entry => entry.q2token && entry.q2token !== 'N/A')
+      .filter(entry => (entry.q2token && entry.q2token !== 'N/A') || entry.isLogonUserCapture)
       .filter(entry => {
         try {
-          return getDomain(entry.url) === activeDomain;
+          const entryDomain = getDomain(entry.url);
+          const domainMatch = entryDomain === activeDomain;
+          if (entry.isLogonUserCapture) {
+            console.log('[popup.js] LogonUser domain check:', { 
+              url: entry.url, 
+              entryDomain: entryDomain, 
+              activeDomain: activeDomain, 
+              match: domainMatch 
+            });
+          }
+          return domainMatch;
         } catch {
           return false;
         }
       });
 
+    console.log('[popup.js] After domain filtering:', {
+      relevantRequests: relevantRequests.length,
+      logonUserRelevant: relevantRequests.filter(r => r.isLogonUserCapture).length
+    });
+
     if (relevantRequests.length === 0) return null;
 
-    // Get session ID (q2token) - use the most recent one
-    const sessionId = relevantRequests[relevantRequests.length - 1].q2token;
+    // Get session ID (q2token) - use the most recent one from requests that have it
+    const requestsWithToken = relevantRequests.filter(entry => entry.q2token);
+    const sessionId = requestsWithToken.length > 0 ? requestsWithToken[requestsWithToken.length - 1].q2token : 'NO_SESSION';
 
-    // Filter by session ID
+    // Filter by session ID (now logonUser requests will also have q2token)
     const sessionRequests = relevantRequests.filter(entry => entry.q2token === sessionId);
+
+    console.log('[popup.js] createSessionSummary details:', {
+      totalRelevantRequests: relevantRequests.length,
+      sessionId: sessionId,
+      sessionRequestsCount: sessionRequests.length,
+      logonUserCount: sessionRequests.filter(r => r.isLogonUserCapture).length,
+      regularRequestsCount: sessionRequests.filter(r => r.q2token === sessionId).length,
+      logonUserRequests: sessionRequests.filter(r => r.isLogonUserCapture).map(r => ({ url: r.url, isLogonUserCapture: r.isLogonUserCapture }))
+    });
 
     // Get workstation ID
     let workstationId = 'N/A';
@@ -365,7 +407,13 @@ function initializePopup() {
         const sessionChanged = !currentSessionData || currentSessionData.sessionId !== sessionSummary.sessionId;
         
         if (sessionChanged) {
+          console.log('[popup.js] Session change detected:', {
+            oldSession: currentSessionData?.sessionId,
+            newSession: sessionSummary.sessionId
+          });
           currentSessionData = sessionSummary;
+          // Force refresh by clearing the last data hash
+          lastDataHash = null;
         }
 
         // Use workstation ID from summary or fallback to latest cookie
@@ -450,6 +498,61 @@ function initializePopup() {
    * Display individual requests without log buttons
    */
   function displayIndividualRequests(requests, workstationId) {
+    console.log('[popup.js] displayIndividualRequests called with', requests.length, 'requests');
+    
+    // Log detailed info about logonUser requests specifically
+    const logonUserRequests = requests.filter(req => 
+      req.url?.includes('logonUser?') || req.isLogonUserCapture
+    );
+    
+    if (logonUserRequests.length > 0) {
+      console.log('[popup.js] Found', logonUserRequests.length, 'logonUser requests:');
+      logonUserRequests.forEach((req, index) => {
+        console.log(`[popup.js] LogonUser ${index + 1}:`, {
+          requestId: req.requestId,
+          url: req.url,
+          method: req.method,
+          startTime: new Date(req.startTime).toISOString(),
+          statusCode: req.statusCode,
+          isLogonUserCapture: req.isLogonUserCapture,
+          q2token: req.q2token,
+          responseBodyLength: req.responseBody?.length || 0,
+          source: req.isLogonUserCapture ? 'inject.js capture' : 'webRequest API'
+        });
+      });
+      
+      // Check for potential duplicates
+      const urlGroups = {};
+      logonUserRequests.forEach(req => {
+        const baseUrl = req.url?.split('?')[0] || 'unknown';
+        if (!urlGroups[baseUrl]) urlGroups[baseUrl] = [];
+        urlGroups[baseUrl].push(req);
+      });
+      
+      Object.entries(urlGroups).forEach(([baseUrl, reqs]) => {
+        if (reqs.length > 1) {
+          console.warn(`[popup.js] Potential duplicate logonUser requests for ${baseUrl}:`, reqs.length, 'instances');
+          console.warn('[popup.js] Duplicate details:', reqs.map(r => ({
+            id: r.requestId,
+            time: new Date(r.startTime).toISOString(),
+            source: r.isLogonUserCapture ? 'inject' : 'webRequest'
+          })));
+        }
+      });
+    }
+    
+    // Log detailed info about each request
+    requests.forEach((req, index) => {
+      console.log(`[popup.js] Request ${index}:`, {
+        url: req.url,
+        isLogonUserCapture: req.isLogonUserCapture,
+        hasResponseBody: !!req.responseBody,
+        q2token: req.q2token,
+        method: req.method,
+        isLogonUserCheck: req.url?.includes('logonUser?')
+      });
+    });
+    
     const networkDataContainer = document.getElementById('network-data');
     const collapsibleContent = networkDataContainer.parentElement;
     const collapsibleButton = collapsibleContent.previousElementSibling;
@@ -471,6 +574,16 @@ function initializePopup() {
     // Show normal content when there are requests
     let html = '';
     requests.forEach(entry => {
+      console.log('[popup.js] Processing request:', {
+        url: entry.url,
+        hasLogonUserInUrl: entry.url?.includes('logonUser?'),
+        isLogonUser: entry.isLogonUser,
+        isLogonUserCapture: entry.isLogonUserCapture,
+        hasResponseBody: !!entry.responseBody,
+        responseBodyLength: entry.responseBody?.length || 0,
+        method: entry.method
+      });
+      
       const url = entry.url || 'N/A';
       const method = entry.method || 'N/A';
       const status = entry.statusCode || 'N/A';
@@ -484,22 +597,77 @@ function initializePopup() {
       else if (status >= 300 && status < 400) statusColor = '#ffc107';
       else if (status >= 400) statusColor = '#dc3545';
 
+      // Check if this is a logonUser request with response body
+      const isLogonUser = url.includes('logonUser?') || entry.isLogonUser || entry.isLogonUserCapture;
+      const hasResponseBody = entry.responseBody && entry.responseBody.trim().length > 0;
+      
+      // Extract additional context for logonUser requests
+      let logonUserContext = '';
+      if (isLogonUser) {
+        const urlParams = new URLSearchParams(url.split('?')[1] || '');
+        const wsParam = urlParams.get('ws') || url.match(/ws\d+/)?.[0] || '';
+        const timeFromStart = entry.startTime ? new Date(entry.startTime).toLocaleTimeString() : '';
+        const requestSource = entry.isLogonUserCapture ? 'Response Captured' : 'Request Detected';
+        logonUserContext = ` (${requestSource}${wsParam ? ', ' + wsParam : ''}${timeFromStart ? ', ' + timeFromStart : ''})`;
+      }
+      
+      console.log('[popup.js] Request flags:', { 
+        isLogonUser: isLogonUser, 
+        hasResponseBody: hasResponseBody,
+        url: url,
+        urlIncludesLogonUser: url.includes('logonUser?'),
+        entryIsLogonUserCapture: entry.isLogonUserCapture,
+        logonUserContext: logonUserContext
+      });
+      
+      // Create unique ID for collapsible response body
+      const responseBodyId = `response-body-${entry.requestId || Math.random().toString(36).substr(2, 9)}`;
+
       html += `
-        <div class="request-item">
+        <div class="request-item ${isLogonUser ? 'logon-user-request' : ''}">
           <div class="request-url">${method} ${url}</div>
           <div class="request-details">
             <strong>Status:</strong> <span style="color: ${statusColor}; font-weight: bold;">${status}</span> | 
             <strong>Time:</strong> ${time}ms | 
-            <strong>Started:</strong> ${startTime} GMT<br>
-            <strong>Session ID:</strong> ${entry.q2token}<br>
-            <strong>Workstation ID:</strong> ${workstationId}<br>
-            <strong>FI Number:</strong> ${fi_no}
+            <strong>Started:</strong> ${startTime} GMT
+            ${isLogonUser ? `<br><span class="logon-user-badge">🔐 LogonUser Request${logonUserContext}</span>` : ''}
+            ${hasResponseBody ? `
+              <br><button class="response-body-toggle" data-response-id="${responseBodyId}">
+                📄 View Response Body
+              </button>
+              <div id="${responseBodyId}" class="response-body-content" style="display: none;">
+                <div class="response-body-header">
+                  LogonUser Response Body
+                  <button class="download-response-btn" data-response-data="${escapeHtml(JSON.stringify(entry.responseBody))}" data-url="${escapeHtml(entry.url)}">
+                    💾 Download JSON
+                  </button>
+                </div>
+                <pre class="response-body-text">${formatJsonResponse(entry.responseBody)}</pre>
+              </div>
+            ` : ''}
           </div>
         </div>
       `;
     });
 
     networkDataContainer.innerHTML = html;
+    
+    // Add event listeners for response body toggle buttons (CSP-compliant)
+    networkDataContainer.querySelectorAll('.response-body-toggle').forEach(button => {
+      button.addEventListener('click', (e) => {
+        const responseId = e.target.getAttribute('data-response-id');
+        toggleResponseBody(responseId);
+      });
+    });
+    
+    // Add event listeners for download response buttons
+    networkDataContainer.querySelectorAll('.download-response-btn').forEach(button => {
+      button.addEventListener('click', (e) => {
+        const responseData = e.target.getAttribute('data-response-data');
+        const url = e.target.getAttribute('data-url');
+        downloadLogonUserResponse(JSON.parse(responseData), url);
+      });
+    });
   }
 
   // Fetch network data for the current site and show in popup
@@ -517,6 +685,13 @@ function initializePopup() {
         }
         
         if (response?.data) {
+          console.log('[popup.js] Received network data:', {
+            totalRequests: response.data.length,
+            logonUserCaptures: response.data.filter(r => r.isLogonUserCapture).length,
+            logonUserUrls: response.data.filter(r => r.url?.includes('logonUser')).map(r => r.url),
+            sampleUrls: response.data.slice(0, 3).map(r => r.url)
+          });
+          
           // Check if data has actually changed to prevent unnecessary re-renders
           const newDataHash = createDataHash(response.data);
           
@@ -539,6 +714,109 @@ function initializePopup() {
     }, 100); // Increased debounce to 100ms
   }
 
+  // Helper function to escape HTML in response bodies
+  function escapeHtml(text) {
+    const map = {
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#039;'
+    };
+    return text.replace(/[&<>"']/g, function(m) { return map[m]; });
+  }
+
+  // Helper function to format JSON response with proper indentation and syntax highlighting
+  function formatJsonResponse(responseBody) {
+    try {
+      // Try to parse as JSON
+      const jsonData = JSON.parse(responseBody);
+      const formattedJson = JSON.stringify(jsonData, null, 2);
+      
+      // Apply basic syntax highlighting
+      return escapeHtml(formattedJson)
+        .replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?)/g, '<span class="json-key">$1</span>')
+        .replace(/:\s*("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*")/g, ': <span class="json-string">$1</span>')
+        .replace(/:\s*(true|false)/g, ': <span class="json-boolean">$1</span>')
+        .replace(/:\s*(null)/g, ': <span class="json-null">$1</span>')
+        .replace(/:\s*(-?\d+(?:\.\d+)?)/g, ': <span class="json-number">$1</span>');
+    } catch (error) {
+      console.warn('[popup.js] Response body is not valid JSON, displaying as plain text:', error);
+      // If not JSON, return escaped plain text
+      return escapeHtml(responseBody);
+    }
+  }
+
+  // Helper function to download logonUser response as JSON file
+  function downloadLogonUserResponse(responseData, url) {
+    try {
+      let jsonData;
+      let filename;
+      
+      // Try to parse the response data if it's a string
+      if (typeof responseData === 'string') {
+        try {
+          jsonData = JSON.parse(responseData);
+        } catch (e) {
+          // If not JSON, wrap in an object
+          jsonData = {
+            responseText: responseData,
+            url: url,
+            capturedAt: new Date().toISOString()
+          };
+        }
+      } else {
+        jsonData = responseData;
+      }
+      
+      // Create enhanced data with metadata
+      const enhancedData = {
+        metadata: {
+          capturedAt: new Date().toISOString(),
+          url: url,
+          type: 'logonUser_response',
+          source: 'Q2_Easy_Log_Extension'
+        },
+        response: jsonData
+      };
+      
+      // Generate filename from URL
+      const urlParts = url.split('/');
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      filename = `logonUser-response-${timestamp}.json`;
+      
+      // Create and download the file
+      const blob = new Blob([JSON.stringify(enhancedData, null, 2)], { type: 'application/json' });
+      const downloadUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = downloadUrl;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(downloadUrl);
+      
+      console.log('[popup.js] Downloaded logonUser response as:', filename);
+    } catch (error) {
+      console.error('[popup.js] Failed to download logonUser response:', error);
+      alert('Failed to download response data. Check console for details.');
+    }
+  }
+
+  // Function to toggle response body visibility
+  window.toggleResponseBody = function(responseBodyId) {
+    const element = document.getElementById(responseBodyId);
+    const button = element.previousElementSibling;
+    
+    if (element.style.display === 'none') {
+      element.style.display = 'block';
+      button.textContent = '📄 Hide Response Body';
+      button.classList.add('active');
+    } else {
+      element.style.display = 'none';
+      button.textContent = '📄 View Response Body';
+      button.classList.remove('active');
+    }
+  };
+
   // --- Initialize the popup UI on load ---
   chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
     const activeTab = tabs[0];
@@ -552,6 +830,17 @@ function initializePopup() {
       loadSites(activeDomain);         // Load or add active site
       populateEnvInfo(activeTab.id);   // Request and render env info
       fetchNetworkData(activeDomain);  // Show network activity
+      
+      // Set up periodic refresh to catch new sessions and logonUser requests
+      const refreshInterval = setInterval(() => {
+        fetchNetworkData(activeDomain);
+      }, 2000); // Refresh every 2 seconds
+      
+      // Clean up interval when popup is closed
+      window.addEventListener('beforeunload', () => {
+        clearInterval(refreshInterval);
+      });
+      
     } catch (error) {
       console.error('[popup.js] Initialization error:', error);
     }

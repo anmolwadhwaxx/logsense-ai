@@ -1,5 +1,158 @@
 // Self-invoking function to avoid polluting global scope
 (function () {
+  console.log('[inject.js] Script loaded and starting logonUser interception setup');
+
+  // Test basic postMessage communication
+  setTimeout(() => {
+    window.postMessage({
+      type: 'TEST_FROM_INJECT',
+      data: 'Hello from inject.js'
+    }, '*');
+    console.log('[inject.js] Sent test postMessage to content script');
+  }, 1000);
+
+  // --- LogonUser Request Interception ---
+  
+    console.log('[inject.js] Script starting');
+
+  // Function to extract q2token from cookies
+  function getCurrentSessionId() {
+    try {
+      const cookies = document.cookie.split(';');
+      for (let cookie of cookies) {
+        const [name, value] = cookie.trim().split('=');
+        if (name === 'q2token') {
+          return value;
+        }
+      }
+      return null;
+    } catch (error) {
+      console.warn('[inject.js] Failed to extract session ID:', error);
+      return null;
+    }
+  }
+
+  // Store original functions IMMEDIATELY
+  const originalFetch = window.fetch;
+  const originalXHROpen = XMLHttpRequest.prototype.open;
+  const originalXHRSend = XMLHttpRequest.prototype.send;
+  
+  console.log('[inject.js] Original functions stored');
+  
+  // Override fetch to capture logonUser response bodies
+  window.fetch = async function(...args) {
+    const [resource, config] = args;
+    let url = resource;
+    
+    // Handle Request object
+    if (resource instanceof Request) {
+      url = resource.url;
+    }
+    
+    console.log('[inject.js] Fetch intercepted for URL:', url);
+    
+    // Call original fetch
+    const response = await originalFetch.apply(this, args);
+    
+    // Check if URL contains "logonUser?"
+    if (url && url.includes('logonUser?')) {
+      console.log('[inject.js] LogonUser request detected!', url);
+      try {
+        // Clone response to read body without consuming it
+        const responseClone = response.clone();
+        const responseBody = await responseClone.text();
+        
+        console.log('[inject.js] Response body captured:', responseBody.substring(0, 100) + '...');
+        
+        // Send response body to content script via postMessage
+        const sessionId = getCurrentSessionId();
+        const messageData = {
+          type: 'LOGON_USER_RESPONSE',
+          data: {
+            url: url,
+            method: config?.method || 'GET',
+            status: response.status,
+            statusText: response.statusText,
+            responseBody: responseBody,
+            timestamp: Date.now(),
+            headers: Object.fromEntries(response.headers.entries()),
+            q2token: sessionId
+          }
+        };
+        
+        window.postMessage(messageData, '*');
+        console.log('[inject.js] PostMessage sent for logonUser response');
+        
+        // Also try sending directly to window.parent in case we're in an iframe
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage(messageData, '*');
+          console.log('[inject.js] PostMessage also sent to parent window');
+        }
+        
+      } catch (error) {
+        console.error('[inject.js] Failed to capture response body:', error);
+      }
+    }
+    
+    return response;
+  };
+  
+  console.log('[inject.js] Fetch override installed');
+  
+  // Also intercept XMLHttpRequest for older Q2 applications
+  XMLHttpRequest.prototype.open = function(method, url, ...args) {
+    console.log('[inject.js] XHR open intercepted:', method, url);
+    this._easyLogUrl = url;
+    this._easyLogMethod = method;
+    return originalXHROpen.apply(this, [method, url, ...args]);
+  };
+  
+  XMLHttpRequest.prototype.send = function(...args) {
+    if (this._easyLogUrl && this._easyLogUrl.includes('logonUser?')) {
+      console.log('[inject.js] LogonUser XHR request detected!', this._easyLogUrl);
+      
+      // Set up response handler
+      this.addEventListener('loadend', () => {
+        if (this.readyState === 4) {
+          console.log('[inject.js] XHR loadend for logonUser, status:', this.status);
+          try {
+            const sessionId = getCurrentSessionId();
+            const messageData = {
+              type: 'LOGON_USER_RESPONSE',
+              data: {
+                url: this._easyLogUrl,
+                method: this._easyLogMethod || 'GET',
+                status: this.status,
+                statusText: this.statusText,
+                responseBody: this.responseText,
+                timestamp: Date.now(),
+                headers: this.getAllResponseHeaders(),
+                q2token: sessionId
+              }
+            };
+            
+            window.postMessage(messageData, '*');
+            console.log('[inject.js] XHR PostMessage sent for logonUser response');
+            
+            // Also try sending to parent window
+            if (window.parent && window.parent !== window) {
+              window.parent.postMessage(messageData, '*');
+              console.log('[inject.js] XHR PostMessage also sent to parent window');
+            }
+            
+          } catch (error) {
+            console.error('[inject.js] Failed to capture XHR response body:', error);
+          }
+        }
+      });
+    }
+    
+    return originalXHRSend.apply(this, args);
+  };
+
+  console.log('[inject.js] XHR override installed');
+
+  // --- End LogonUser Interception ---
 
   // Helper function to read a cookie by name
   function readCookie(name) {

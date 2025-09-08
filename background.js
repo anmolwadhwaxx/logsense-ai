@@ -98,7 +98,8 @@ chrome.webRequest.onBeforeRequest.addListener(
       method: details.method,
       startTime: details.timeStamp,
       fi_no: extractFiNo(details.url),
-      postData: details.requestBody ? JSON.stringify(details.requestBody) : null
+      postData: details.requestBody ? JSON.stringify(details.requestBody) : null,
+      isLogonUser: details.url.includes('logonUser?') // Flag logonUser requests
     };
     saveRequestsToStorage(); // Persist to storage
   },
@@ -150,12 +151,107 @@ chrome.webRequest.onHeadersReceived.addListener(
       // Extract content type for HAR
       const contentTypeHeader = details.responseHeaders?.find(h => h.name.toLowerCase() === 'content-type');
       req.mimeType = contentTypeHeader?.value || 'text/plain';
+      
+      // For logonUser requests, inject script to capture response body
+      if (req.isLogonUser && details.tabId && details.tabId !== -1) {
+        // Inject script to capture response body for this specific request
+        chrome.scripting.executeScript({
+          target: { tabId: details.tabId },
+          func: captureLogonUserResponse,
+          args: [details.url, details.requestId]
+        }).catch(err => {
+          console.warn('[background.js] Failed to inject response capture script:', err);
+        });
+      }
+      
       saveRequestsToStorage(); // Persist to storage
     }
   },
   { urls: ["<all_urls>"] },
   ["responseHeaders"] // Required to access response headers
 );
+
+// Function to inject for capturing logonUser response body
+function captureLogonUserResponse(url, requestId) {
+  // This function runs in the page context
+  
+  // Override fetch if not already done
+  if (!window.easyLogFetchOverridden) {
+    const originalFetch = window.fetch;
+    window.fetch = async function(...args) {
+      const [resource, config] = args;
+      let requestUrl = resource;
+      
+      if (resource instanceof Request) {
+        requestUrl = resource.url;
+      }
+      
+      const response = await originalFetch.apply(this, args);
+      
+      // Check if this matches our target URL
+      if (requestUrl === url) {
+        try {
+          const responseClone = response.clone();
+          const responseBody = await responseClone.text();
+          
+          // Send to background script
+          chrome.runtime.sendMessage({
+            type: 'LOGON_USER_RESPONSE_CAPTURED',
+            data: {
+              requestId: requestId,
+              url: requestUrl,
+              responseBody: responseBody,
+              status: response.status,
+              statusText: response.statusText,
+              timestamp: Date.now()
+            }
+          });
+        } catch (error) {
+          console.warn('[EasyLog] Failed to capture response body:', error);
+        }
+      }
+      
+      return response;
+    };
+    window.easyLogFetchOverridden = true;
+  }
+  
+  // Also check if request was made via XHR
+  const originalXHROpen = XMLHttpRequest.prototype.open;
+  const originalXHRSend = XMLHttpRequest.prototype.send;
+  
+  XMLHttpRequest.prototype.open = function(method, requestUrl, ...args) {
+    this._easyLogUrl = requestUrl;
+    this._easyLogRequestId = requestId;
+    return originalXHROpen.apply(this, [method, requestUrl, ...args]);
+  };
+  
+  XMLHttpRequest.prototype.send = function(...args) {
+    if (this._easyLogUrl === url) {
+      this.addEventListener('loadend', () => {
+        if (this.readyState === 4) {
+          try {
+            chrome.runtime.sendMessage({
+              type: 'LOGON_USER_RESPONSE_CAPTURED',
+              data: {
+                requestId: this._easyLogRequestId,
+                url: this._easyLogUrl,
+                responseBody: this.responseText,
+                status: this.status,
+                statusText: this.statusText,
+                timestamp: Date.now()
+              }
+            });
+          } catch (error) {
+            console.warn('[EasyLog] Failed to capture XHR response body:', error);
+          }
+        }
+      });
+    }
+    
+    return originalXHRSend.apply(this, args);
+  };
+}
 
 // Capture when request is completed to store status and end time
 chrome.webRequest.onCompleted.addListener(
@@ -186,6 +282,28 @@ chrome.webRequest.onErrorOccurred.addListener(
 
 // --- Message Listener (handles messages from popup or content script) ---
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  console.log('[background.js] Received message:', {
+    type: message?.type,
+    action: message?.action,
+    tabId: sender.tab?.id,
+    url: sender.tab?.url,
+    messageKeys: message ? Object.keys(message) : 'no message'
+  });
+  
+  // Handle undefined or malformed messages
+  if (!message) {
+    console.warn('[background.js] Received undefined message');
+    sendResponse({ error: 'Message is undefined' });
+    return true;
+  }
+  
+  // Test message from content script
+  if (message.type === 'TEST_CONTENT_TO_BACKGROUND') {
+    console.log('[background.js] TEST: Received test message from content script:', message.data);
+    sendResponse({ success: true, message: 'Background received your test message' });
+    return true; // Keep message channel open
+  }
+  
   // Return captured network data to popup (with throttling)
   if (message.action === 'getNetworkData') {
     const now = Date.now();
@@ -222,5 +340,110 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // Provide cached env info when popup requests it
   } else if (message.type === 'GET_CACHED_ENV_INFO') {
     sendResponse({ data: cachedEnvInfo });
+
+  // Handle logonUser response body capture
+  } else if (message.type === 'LOGON_USER_RESPONSE') {
+    console.log('[background.js] Received LOGON_USER_RESPONSE!', message.data?.url);
+    
+    const responseData = message.data;
+    
+    // Log all existing logonUser requests for debugging
+    const existingLogonRequests = Object.values(requests).filter(req => 
+      req.url?.includes('logonUser?') || req.isLogonUserCapture
+    );
+    console.log('[background.js] Existing logonUser requests:', existingLogonRequests.length);
+    existingLogonRequests.forEach((req, index) => {
+      console.log(`[background.js] Existing ${index + 1}:`, {
+        id: req.requestId,
+        url: req.url,
+        time: new Date(req.startTime || 0).toISOString(),
+        source: req.isLogonUserCapture ? 'inject capture' : 'webRequest'
+      });
+    });
+    
+    // Find matching request by URL and approximate timestamp
+    let matchingRequest = null;
+    const requestArray = Object.values(requests);
+    
+    // Look for request with same URL within last 30 seconds
+    const timeWindow = 30000; // 30 seconds
+    for (const req of requestArray) {
+      if (req.url === responseData.url && 
+          Math.abs((req.startTime || 0) - responseData.timestamp) < timeWindow) {
+        matchingRequest = req;
+        console.log('[background.js] Found matching request for response body:', req.requestId);
+        break;
+      }
+    }
+    
+    if (matchingRequest) {
+      // Add response body to existing request
+      matchingRequest.responseBody = responseData.responseBody;
+      matchingRequest.capturedResponseHeaders = responseData.headers;
+      console.log('[background.js] Added response body to request:', matchingRequest.requestId);
+    } else {
+      // Create new entry for this logonUser response
+      console.log('[background.js] No matching request found, creating new synthetic entry');
+      const syntheticId = 'logon_' + Date.now();
+      
+      // Ensure we have an absolute URL
+      let absoluteUrl = responseData.url;
+      if (responseData.url && !responseData.url.startsWith('http')) {
+        // Convert relative URL to absolute using the sender tab's URL
+        try {
+          const tabUrl = sender.tab?.url;
+          if (tabUrl) {
+            const baseUrl = new URL(tabUrl);
+            // For relative URLs like "mobilews/logonUser?ws25", we need to resolve against the tab's path
+            // This will preserve the FI-specific path structure
+            absoluteUrl = new URL(responseData.url, tabUrl).href;
+            console.log('[background.js] Converted relative URL:', responseData.url, 'to absolute:', absoluteUrl, 'using base:', tabUrl);
+          } else {
+            console.warn('[background.js] No tab URL available for relative URL conversion:', responseData.url);
+            absoluteUrl = responseData.url; // fallback to original
+          }
+        } catch (error) {
+          console.warn('[background.js] Failed to convert relative URL:', responseData.url, error);
+          absoluteUrl = responseData.url; // fallback to original
+        }
+      }
+      
+      requests[syntheticId] = {
+        requestId: syntheticId,
+        url: absoluteUrl,
+        method: responseData.method,
+        startTime: responseData.timestamp,
+        endTime: responseData.timestamp,
+        statusCode: responseData.status,
+        statusText: responseData.statusText,
+        responseBody: responseData.responseBody,
+        capturedResponseHeaders: responseData.headers,
+        isLogonUserCapture: true, // Flag to identify these special captures
+        q2token: responseData.q2token // Include session ID from the captured request
+      };
+      console.log('[background.js] Created new logonUser capture entry:', syntheticId, 'with session ID:', responseData.q2token);
+    }
+    
+    saveRequestsToStorage(); // Persist to storage
+    sendResponse({ success: true });
+
+  // Handle logonUser response body capture from injected script
+  } else if (message.type === 'LOGON_USER_RESPONSE_CAPTURED') {
+    const responseData = message.data;
+    
+    // Find the matching request by requestId
+    const matchingRequest = requests[responseData.requestId];
+    
+    if (matchingRequest) {
+      // Add response body to existing request
+      matchingRequest.responseBody = responseData.responseBody;
+      matchingRequest.capturedAt = responseData.timestamp;
+      console.log('[background.js] Captured response body for logonUser request:', responseData.requestId);
+      saveRequestsToStorage(); // Persist to storage
+    } else {
+      console.warn('[background.js] No matching request found for captured response:', responseData.requestId);
+    }
+    
+    sendResponse({ success: true });
   }
 });
