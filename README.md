@@ -94,6 +94,15 @@
 - **Improved code maintainability** with modular structure and clear separation of concerns
 - **Better testing support** with structured data formats and predictable behavior patterns
 
+### Enhanced LogonUser Response Display (Latest)
+
+- **Advanced JSON formatting** with proper indentation and color-coded syntax highlighting for LogonUser response bodies
+- **Interactive download functionality** with enhanced metadata including capture timestamp, request URL, and source information
+- **Streamlined UI presentation** with removal of redundant session information to focus on relevant data per section
+- **Intelligent session management** with 2-second auto-refresh intervals and smart session change detection
+- **Comprehensive duplicate detection** with detailed logging to track request sources and identify duplicate LogonUser requests
+- **Enhanced debugging capabilities** for monitoring LogonUser request flow and session transitions
+
 ---
 
 ## Extension Architecture & User Interface
@@ -139,6 +148,9 @@ The extension features a sophisticated architecture with a comprehensive popup i
 #### **Individual Request Explorer (Collapsible)**
 - **Detailed request analysis** without interface redundancy
 - **Complete header inspection** with timing analysis and payload examination
+- **Enhanced LogonUser response display** with JSON syntax highlighting and proper formatting
+- **Interactive download functionality** for LogonUser responses with metadata (timestamp, URL, source)
+- **Smart session change detection** with automatic refresh and duplicate request filtering
 - **Enhanced data visualization** with improved formatting and readability
 - **Request filtering** showing only session-relevant traffic
 
@@ -175,7 +187,7 @@ The extension features a sophisticated architecture with a comprehensive popup i
 ### Core Extension Files
 
 - **`manifest.json`**: Extension configuration with Manifest V3 compliance, permissions, and resource definitions
-- **`background.js`**: Service worker handling network request interception, data storage, and cross-component communication
+- **`background.js`**: Service worker handling network request interception, data storage, and cross-component communication with enhanced LogonUser request tracking and duplicate detection logging
 - **`content.js`**: Content script providing page integration, script injection, and floating UI elements
 
 ### User Interface Components
@@ -189,6 +201,10 @@ The extension features a sophisticated architecture with a comprehensive popup i
 - **`popup/popup.js`**: Core application logic featuring:
   - Intelligent session aggregation and management
   - Real-time Alexandria log URL generation with environment detection
+  - Enhanced LogonUser response display with JSON formatting and syntax highlighting
+  - Interactive download functionality for LogonUser responses with comprehensive metadata
+  - Smart session change detection with automatic refresh capabilities
+  - Comprehensive duplicate request detection and logging
   - HAR export functionality with timestamp-based file naming
   - Environment metadata display and session persistence
 
