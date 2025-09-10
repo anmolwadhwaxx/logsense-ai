@@ -541,23 +541,53 @@ function initializePopup() {
       });
     }
     
-    // Log detailed info about each request
-    requests.forEach((req, index) => {
-      console.log(`[popup.js] Request ${index}:`, {
-        url: req.url,
-        isLogonUserCapture: req.isLogonUserCapture,
-        hasResponseBody: !!req.responseBody,
-        q2token: req.q2token,
-        method: req.method,
-        isLogonUserCheck: req.url?.includes('logonUser?')
+    // Deduplicate requests: separate logonUser and non-logonUser requests
+    const nonLogonUserRequests = requests.filter(req => 
+      !req.url?.includes('logonUser?') && !req.isLogonUser && !req.isLogonUserCapture
+    );
+    
+    // For logonUser requests, keep only the most recent one with response body (prioritize captures)
+    let bestLogonUserRequest = null;
+    if (logonUserRequests.length > 0) {
+      // Sort by preference: captures with response body > captures without > regular requests
+      // Then by most recent time
+      bestLogonUserRequest = logonUserRequests.sort((a, b) => {
+        // Priority scoring: capture with response (3) > capture without (2) > regular (1)
+        const getScore = (req) => {
+          if (req.isLogonUserCapture && req.responseBody) return 3;
+          if (req.isLogonUserCapture) return 2;
+          return 1;
+        };
+        
+        const scoreA = getScore(a);
+        const scoreB = getScore(b);
+        
+        if (scoreA !== scoreB) return scoreB - scoreA; // Higher score first
+        return (b.startTime || 0) - (a.startTime || 0); // Most recent first
+      })[0];
+      
+      console.log('[popup.js] Selected best logonUser request:', {
+        url: bestLogonUserRequest.url,
+        isCapture: bestLogonUserRequest.isLogonUserCapture,
+        hasResponseBody: !!bestLogonUserRequest.responseBody,
+        startTime: new Date(bestLogonUserRequest.startTime).toISOString()
       });
-    });
+    }
+    
+    // Create final request list: logonUser at top (if exists), then others
+    const displayRequests = [];
+    if (bestLogonUserRequest) {
+      displayRequests.push(bestLogonUserRequest);
+    }
+    displayRequests.push(...nonLogonUserRequests);
+    
+    console.log('[popup.js] Final display requests:', displayRequests.length, 'total (1 logonUser max +', nonLogonUserRequests.length, 'others)');
     
     const networkDataContainer = document.getElementById('network-data');
     const collapsibleContent = networkDataContainer.parentElement;
     const collapsibleButton = collapsibleContent.previousElementSibling;
     
-    if (requests.length === 0) {
+    if (displayRequests.length === 0) {
       // Hide the content and disable the button
       collapsibleContent.style.display = "none";
       collapsibleButton.classList.remove('active');
@@ -573,7 +603,7 @@ function initializePopup() {
 
     // Show normal content when there are requests
     let html = '';
-    requests.forEach(entry => {
+    displayRequests.forEach(entry => {
       console.log('[popup.js] Processing request:', {
         url: entry.url,
         hasLogonUserInUrl: entry.url?.includes('logonUser?'),
