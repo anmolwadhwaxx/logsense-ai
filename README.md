@@ -90,6 +90,22 @@
 
 ## Latest Updates
 
+### V3.0.0 - Advanced Session Isolation and Enhanced User Details (Latest)
+
+- **🔒 Multi-Tab Session Isolation**: Revolutionary popup source tab tracking prevents cross-session data contamination
+- **💎 Enhanced Transaction Rights Display**: Detailed permissions with view levels, action badges, and dual auth limits
+- **🐛 Comprehensive Debug System**: Advanced logging and troubleshooting capabilities for empty transaction rights
+- **🎨 Environment Context Integration**: New User Details environment section with cached data integration
+- **🧹 Code Cleanup**: Removed unused files and improved performance optimizations
+
+### Enhanced User Details Tab
+
+- **User Profile Section**: Complete user information display with session-filtered data
+- **Transaction Rights**: Dynamic permission parsing with visual badges for Draft/Authorize/Cancel actions
+- **Capabilities Management**: Feature flags and system flags with enhanced visualization
+- **Environment Context**: Real-time environment data display integrated with main tab cache
+- **Session Consistency**: User Details now matches Network Logs tab filtering behavior
+
 ### Major UI/UX Improvements
 
 - **Complete interface redesign** with modern, professional styling and improved visual hierarchy
