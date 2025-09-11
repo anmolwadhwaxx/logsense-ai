@@ -1,7 +1,12 @@
-// Store all captured request data by requestId - using persistent storage
-const requests = {};
-const MAX_STORED_REQUESTS = 1000; // Limit to prevent storage overflow
-const STORAGE_KEY = 'easylog_requests';
+// Store all captured request data organized by session ID
+const sessions = {}; // sessionId -> { requests: {}, envInfo: null, lastActivity: timestamp }
+const recentSessionsByDomain = {}; // domain -> sessionId (for fallback during refresh)
+const popupSourceTabs = {}; // popupId -> tabId (track which tab each popup was opened from)
+let popupCounter = 0; // Generate unique popup IDs
+const MAX_STORED_REQUESTS_PER_SESSION = 500;
+const MAX_SESSIONS = 10; // Keep last 10 sessions
+const SESSION_CLEANUP_INTERVAL = 5 * 60 * 1000; // 5 minutes
+const STORAGE_KEY = 'easylog_sessions';
 const ENV_STORAGE_KEY = 'easylog_env_info';
 
 // Store latest environment info sent from content script
@@ -11,11 +16,11 @@ let cachedEnvInfo = null;
 let lastPopupRequestTime = 0;
 const POPUP_REQUEST_THROTTLE = 50; // Reduced to 50ms throttle
 
-// Load stored requests on startup
+// Load stored sessions on startup
 chrome.storage.local.get([STORAGE_KEY], (result) => {
   if (result[STORAGE_KEY]) {
-    Object.assign(requests, result[STORAGE_KEY]);
-    console.log('[background.js] Restored', Object.keys(requests).length, 'requests from storage');
+    Object.assign(sessions, result[STORAGE_KEY]);
+    console.log('[background.js] Restored', Object.keys(sessions).length, 'sessions from storage');
   }
 });
 
@@ -27,56 +32,198 @@ chrome.storage.local.get([ENV_STORAGE_KEY], (result) => {
   }
 });
 
-// Persist requests to storage (debounced)
-let saveTimeout = null;
-function saveRequestsToStorage() {
-  if (saveTimeout) clearTimeout(saveTimeout);
-  saveTimeout = setTimeout(() => {
-    // Keep only the most recent requests to prevent storage overflow
-    const requestArray = Object.values(requests);
-    if (requestArray.length > MAX_STORED_REQUESTS) {
-      // Sort by timestamp and keep the most recent ones
-      requestArray.sort((a, b) => (b.startTime || 0) - (a.startTime || 0));
-      const recentRequests = requestArray.slice(0, MAX_STORED_REQUESTS);
-      
-      // Clear and rebuild requests object
-      for (const key in requests) delete requests[key];
-      recentRequests.forEach(req => {
-        requests[req.requestId] = req;
-      });
+// Clean up popup tracking when tabs are closed
+chrome.tabs.onRemoved.addListener((tabId) => {
+  // Remove any popup tracking for the closed tab
+  for (const [popupId, sourceTabId] of Object.entries(popupSourceTabs)) {
+    if (sourceTabId === tabId) {
+      delete popupSourceTabs[popupId];
+      console.log(`[background.js] Cleaned up popup ${popupId} tracking for closed tab ${tabId}`);
     }
-    
-    chrome.storage.local.set({
-      [STORAGE_KEY]: requests
-    }, () => {
-      if (chrome.runtime.lastError) {
-        console.warn('[background.js] Failed to save requests:', chrome.runtime.lastError);
-      }
-    });
-  }, 1000); // Save after 1 second of inactivity
+  }
+});
+
+// Helper function to get or create session
+function getOrCreateSession(sessionId) {
+  if (!sessionId || sessionId === 'N/A') {
+    return null; // Don't create sessions for invalid session IDs
+  }
+  
+  if (!sessions[sessionId]) {
+    sessions[sessionId] = {
+      requests: {},
+      envInfo: null,
+      lastActivity: Date.now(),
+      createdAt: Date.now()
+    };
+    console.log(`[background.js] Created new session: ${sessionId}`);
+  } else {
+    sessions[sessionId].lastActivity = Date.now();
+  }
+  
+  return sessions[sessionId];
 }
 
-// Clean up old requests (older than 24 hours)
-function cleanupOldRequests() {
-  const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000);
-  let cleaned = 0;
-  
-  for (const requestId in requests) {
-    const request = requests[requestId];
-    if (request.startTime && request.startTime < oneDayAgo) {
-      delete requests[requestId];
-      cleaned++;
+// Helper function to extract session ID from request
+function extractSessionId(requestHeaders, url) {
+  // Try to get q2token from headers first
+  if (requestHeaders) {
+    const q2tokenHeader = requestHeaders.find(h => h.name.toLowerCase() === 'q2token');
+    if (q2tokenHeader && q2tokenHeader.value && q2tokenHeader.value !== 'null') {
+      return q2tokenHeader.value;
     }
   }
   
-  if (cleaned > 0) {
-    console.log(`[background.js] Cleaned up ${cleaned} old requests`);
-    saveRequestsToStorage();
+  // Fallback to URL-based extraction for logonUser requests
+  if (url && url.includes('logonUser?')) {
+    return 'pending_logon'; // Temporary session for logon requests
   }
+  
+  return null;
+}
+
+// Persist sessions to storage (debounced)
+let saveTimeout = null;
+function saveSessionsToStorage() {
+  if (saveTimeout) clearTimeout(saveTimeout);
+  saveTimeout = setTimeout(() => {
+    // Clean up old sessions
+    cleanupOldSessions();
+    
+    chrome.storage.local.set({
+      [STORAGE_KEY]: sessions
+    }, () => {
+      if (chrome.runtime.lastError) {
+        console.error('[background.js] Error saving sessions:', chrome.runtime.lastError);
+      }
+    });
+  }, 1000);
+}
+
+// Clean up old sessions to prevent storage overflow
+function cleanupOldSessions() {
+  const sessionEntries = Object.entries(sessions);
+  
+  // If we have too many sessions, keep only the most recent ones
+  if (sessionEntries.length > MAX_SESSIONS) {
+    sessionEntries.sort(([,a], [,b]) => b.lastActivity - a.lastActivity);
+    
+    const sessionsToKeep = sessionEntries.slice(0, MAX_SESSIONS);
+    const newSessions = {};
+    
+    sessionsToKeep.forEach(([sessionId, sessionData]) => {
+      newSessions[sessionId] = sessionData;
+    });
+    
+    // Replace sessions object
+    for (const key in sessions) delete sessions[key];
+    Object.assign(sessions, newSessions);
+    
+    console.log(`[background.js] Cleaned up sessions, kept ${Object.keys(sessions).length} most recent`);
+  }
+  
+  // Clean up old requests within each session
+  Object.values(sessions).forEach(session => {
+    const requests = Object.values(session.requests);
+    if (requests.length > MAX_STORED_REQUESTS_PER_SESSION) {
+      requests.sort((a, b) => (b.startTime || 0) - (a.startTime || 0));
+      const recentRequests = requests.slice(0, MAX_STORED_REQUESTS_PER_SESSION);
+      
+      session.requests = {};
+      recentRequests.forEach(req => {
+        session.requests[req.requestId] = req;
+      });
+    }
+  });
 }
 
 // Run cleanup every hour
-setInterval(cleanupOldRequests, 60 * 60 * 1000);
+setInterval(() => {
+  cleanupOldSessions();
+  saveSessionsToStorage();
+}, SESSION_CLEANUP_INTERVAL);
+
+// Helper function to get session data for a specific tab
+function getSessionDataForTab(tab, callback) {
+  if (!tab) {
+    callback([]);
+    return;
+  }
+
+  const url = new URL(tab.url);
+  const domain = url.hostname;
+  
+  console.log(`[background.js] Getting session data for tab: ${tab.id}, domain: ${domain}, url: ${tab.url}`);
+  
+  // Get cookies from the active tab to find the current session
+  // Try different cookie scopes to ensure we get the right session
+  const cookieQueries = [
+    { domain: domain }, // Exact domain match
+    { url: tab.url }, // URL-based lookup (includes path/subdomain context)
+    { domain: domain.startsWith('.') ? domain : '.' + domain } // Try with dot prefix for parent domain
+  ];
+  
+  let activeSessionId = null;
+  let queryIndex = 0;
+  
+  function tryNextCookieQuery() {
+    if (queryIndex >= cookieQueries.length) {
+      // No session found with cookies, try fallback using recent domain activity
+      const recentSessionId = recentSessionsByDomain[domain];
+      if (recentSessionId && sessions[recentSessionId]) {
+        console.log(`[background.js] Using fallback session ${recentSessionId} for domain ${domain}`);
+        const sessionRequests = Object.values(sessions[recentSessionId].requests);
+        callback(sessionRequests);
+        return;
+      }
+      
+      // No session found with any method, return empty data
+      console.log(`[background.js] No q2token found for ${domain} after trying all queries and fallbacks`);
+      callback([]);
+      return;
+    }
+    
+    const query = cookieQueries[queryIndex++];
+    console.log(`[background.js] Trying cookie query ${queryIndex}/${cookieQueries.length}:`, query);
+    
+    chrome.cookies.getAll(query, (cookies) => {
+      if (chrome.runtime.lastError) {
+        console.warn(`[background.js] Cookie query error:`, chrome.runtime.lastError);
+        tryNextCookieQuery();
+        return;
+      }
+      
+      // Look for q2token in cookies
+      for (const cookie of cookies) {
+        if (cookie.name.toLowerCase() === 'q2token' && cookie.value && cookie.value !== 'null' && cookie.value !== 'undefined') {
+          activeSessionId = cookie.value;
+          console.log(`[background.js] Found session ID with query ${queryIndex}: ${activeSessionId}`);
+          
+          // Update recent session tracking for this domain
+          recentSessionsByDomain[domain] = activeSessionId;
+          break;
+        }
+      }
+      
+      if (activeSessionId && sessions[activeSessionId]) {
+        const sessionRequests = Object.values(sessions[activeSessionId].requests);
+        console.log(`[background.js] Returning ${sessionRequests.length} requests for session ${activeSessionId} (tab: ${tab.id})`);
+        callback(sessionRequests);
+      } else if (activeSessionId) {
+        console.log(`[background.js] Session ${activeSessionId} found in cookies but not in sessions storage (tab: ${tab.id})`);
+        // Session ID exists but no session data - return empty but log available sessions
+        const availableSessions = Object.keys(sessions);
+        console.log(`[background.js] Available sessions: [${availableSessions.join(', ')}]`);
+        callback([]);
+      } else {
+        // Try next query
+        tryNextCookieQuery();
+      }
+    });
+  }
+  
+  tryNextCookieQuery();
+}
 
 // --- Helper function ---
 
@@ -88,11 +235,14 @@ function extractFiNo(url) {
 
 // --- Web Request Listeners ---
 
+// Temporary storage for requests before we know their session ID
+const tempRequests = {};
+
 // Capture initial request details
 chrome.webRequest.onBeforeRequest.addListener(
   (details) => {
-    // Initialize tracking for this request
-    requests[details.requestId] = {
+    // Store temporarily until we get session ID from headers
+    tempRequests[details.requestId] = {
       requestId: details.requestId,
       url: details.url,
       method: details.method,
@@ -101,40 +251,66 @@ chrome.webRequest.onBeforeRequest.addListener(
       postData: details.requestBody ? JSON.stringify(details.requestBody) : null,
       isLogonUser: details.url.includes('logonUser?') // Flag logonUser requests
     };
-    saveRequestsToStorage(); // Persist to storage
   },
   { urls: ["<all_urls>"] }, // Listen to all URLs
   ["requestBody"] // Capture request body for HAR
 );
 
-// Capture request headers to extract q2token, workstation-id, utcOffset
+// Capture request headers to extract q2token, workstation-id, utcOffset and assign to session
 chrome.webRequest.onBeforeSendHeaders.addListener(
   (details) => {
-    const req = requests[details.requestId];
-    if (req) {
-      req.requestHeaders = details.requestHeaders;
+    const tempReq = tempRequests[details.requestId];
+    if (!tempReq) return;
+    tempReq.requestHeaders = details.requestHeaders;
 
-      // Extract q2token from headers
-      const q2tokenHeader = details.requestHeaders.find(h => h.name.toLowerCase() === 'q2token');
-      req.q2token = q2tokenHeader?.value || null;
+    // Extract session ID from request
+    const sessionId = extractSessionId(details.requestHeaders, tempReq.url);
+    
+    if (sessionId) {
+      // Get or create session
+      const session = getOrCreateSession(sessionId);
+      if (session) {
+        // Move request from temp storage to session
+        const req = { ...tempReq };
+        
+        // Extract q2token from headers
+        const q2tokenHeader = details.requestHeaders.find(h => h.name.toLowerCase() === 'q2token');
+        req.q2token = q2tokenHeader?.value || sessionId;
 
-      // Extract from Cookie header
-      const cookieHeader = details.requestHeaders.find(h => h.name.toLowerCase() === 'cookie');
-      if (cookieHeader?.value) {
-        // Extract workstation-id from cookie string
-        const matchWorkstationId = cookieHeader.value.match(/(?:^|;\s*)workstation-id=([^;]*)/i);
-        if (matchWorkstationId) {
-          req.workstationId = matchWorkstationId[1];
+        // Extract from Cookie header
+        const cookieHeader = details.requestHeaders.find(h => h.name.toLowerCase() === 'cookie');
+        if (cookieHeader?.value) {
+          // Extract workstation-id from cookie string
+          const matchWorkstationId = cookieHeader.value.match(/(?:^|;\s*)workstation-id=([^;]*)/i);
+          if (matchWorkstationId) {
+            req.workstationId = matchWorkstationId[1];
+          }
+
+          // Extract utcOffset (e.g. +0000) from cookie
+          const matchUtcOffset = cookieHeader.value.match(/(?:^|;\s*)utcOffset=([-+]\d{4})/i);
+          if (matchUtcOffset) {
+            req.utcOffset = matchUtcOffset[1];
+          }
         }
-
-        // Extract utcOffset (e.g. +0000) from cookie
-        const matchUtcOffset = cookieHeader.value.match(/(?:^|;\s*)utcOffset=([-+]\d{4})/i);
-        if (matchUtcOffset) {
-          req.utcOffset = matchUtcOffset[1];
+        
+        // Store in session
+        session.requests[details.requestId] = req;
+        
+        // Track recent session activity by domain for fallback
+        try {
+          const domain = new URL(req.url).hostname;
+          recentSessionsByDomain[domain] = sessionId;
+          console.log(`[background.js] Updated recent session for ${domain}: ${sessionId}`);
+        } catch (e) {
+          console.warn('[background.js] Could not extract domain from URL:', req.url);
         }
+        
+        saveSessionsToStorage();
       }
-      saveRequestsToStorage(); // Persist to storage
     }
+    
+    // Clean up temp storage
+    delete tempRequests[details.requestId];
   },
   { urls: ["<all_urls>"] },
   ["requestHeaders"] // Required to access request headers
@@ -143,7 +319,18 @@ chrome.webRequest.onBeforeSendHeaders.addListener(
 // Capture response headers for the request
 chrome.webRequest.onHeadersReceived.addListener(
   (details) => {
-    const req = requests[details.requestId];
+    // Find request in any session
+    let req = null;
+    let parentSession = null;
+    
+    for (const session of Object.values(sessions)) {
+      if (session.requests[details.requestId]) {
+        req = session.requests[details.requestId];
+        parentSession = session;
+        break;
+      }
+    }
+    
     if (req) {
       req.responseHeaders = details.responseHeaders;
       req.statusText = details.statusLine;
@@ -158,13 +345,13 @@ chrome.webRequest.onHeadersReceived.addListener(
         chrome.scripting.executeScript({
           target: { tabId: details.tabId },
           func: captureLogonUserResponse,
-          args: [details.url, details.requestId]
+          args: [details.url, details.requestId, req.q2token || 'pending_logon']
         }).catch(err => {
           console.warn('[background.js] Failed to inject response capture script:', err);
         });
       }
       
-      saveRequestsToStorage(); // Persist to storage
+      saveSessionsToStorage(); // Persist to storage
     }
   },
   { urls: ["<all_urls>"] },
@@ -256,12 +443,21 @@ function captureLogonUserResponse(url, requestId) {
 // Capture when request is completed to store status and end time
 chrome.webRequest.onCompleted.addListener(
   (details) => {
-    const req = requests[details.requestId];
+    // Find request in any session
+    let req = null;
+    
+    for (const session of Object.values(sessions)) {
+      if (session.requests[details.requestId]) {
+        req = session.requests[details.requestId];
+        break;
+      }
+    }
+    
     if (req) {
       req.statusCode = details.statusCode;
       req.endTime = details.timeStamp;
       req.responseSize = details.responseSize;
-      saveRequestsToStorage(); // Persist to storage
+      saveSessionsToStorage(); // Persist to storage
     }
   },
   { urls: ["<all_urls>"] }
@@ -270,11 +466,20 @@ chrome.webRequest.onCompleted.addListener(
 // Capture error information
 chrome.webRequest.onErrorOccurred.addListener(
   (details) => {
-    const req = requests[details.requestId];
+    // Find request in any session
+    let req = null;
+    
+    for (const session of Object.values(sessions)) {
+      if (session.requests[details.requestId]) {
+        req = session.requests[details.requestId];
+        break;
+      }
+    }
+    
     if (req) {
       req.error = details.error;
       req.endTime = details.timeStamp;
-      saveRequestsToStorage(); // Persist to storage
+      saveSessionsToStorage(); // Persist to storage
     }
   },
   { urls: ["<all_urls>"] }
@@ -304,28 +509,154 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true; // Keep message channel open
   }
   
-  // Return captured network data to popup (with throttling)
-  if (message.action === 'getNetworkData') {
+  // Initialize popup with source tab tracking
+  if (message.action === 'initializePopup') {
+    // Generate unique popup ID and track the source tab
+    const popupId = ++popupCounter;
+    
+    chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
+      if (tabs[0]) {
+        popupSourceTabs[popupId] = tabs[0].id;
+        console.log(`[background.js] Popup ${popupId} initialized for tab ${tabs[0].id} (${new URL(tabs[0].url).hostname})`);
+        sendResponse({ popupId: popupId, sourceTabId: tabs[0].id });
+      } else {
+        sendResponse({ error: 'No active tab found' });
+      }
+    });
+    return true; // Keep message channel open for async response
+
+  // Return captured network data to popup (session-specific for the popup's source tab)
+  } else if (message.action === 'getNetworkData') {
+    const popupId = message.popupId;
+    const sourceTabId = popupId ? popupSourceTabs[popupId] : null;
+    
     const now = Date.now();
     if (now - lastPopupRequestTime < POPUP_REQUEST_THROTTLE) {
-      // Too soon, return cached response
-      sendResponse({ data: Object.values(requests) });
-      return;
+      // For throttling, we still need to determine the session for the popup's source tab
+      if (sourceTabId) {
+        chrome.tabs.get(sourceTabId, (tab) => {
+          if (chrome.runtime.lastError || !tab) {
+            console.warn(`[background.js] Source tab ${sourceTabId} no longer exists, using active tab as fallback`);
+            chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
+              if (tabs[0]) {
+                getSessionDataForTab(tabs[0], (sessionData) => {
+                  sendResponse({ data: sessionData });
+                });
+              } else {
+                sendResponse({ data: [] });
+              }
+            });
+          } else {
+            getSessionDataForTab(tab, (sessionData) => {
+              sendResponse({ data: sessionData });
+            });
+          }
+        });
+      } else {
+        // Fallback to active tab if no popup ID provided
+        chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
+          if (tabs[0]) {
+            getSessionDataForTab(tabs[0], (sessionData) => {
+              sendResponse({ data: sessionData });
+            });
+          } else {
+            sendResponse({ data: [] });
+          }
+        });
+      }
+      return true; // Keep message channel open for async response
     }
     lastPopupRequestTime = now;
     
-    sendResponse({ data: Object.values(requests) });
+    // Get session data for the popup's source tab, not the currently active tab
+    // Add retry logic to handle timing issues during tab refresh
+    function attemptGetSessionData(retryCount = 0) {
+      const maxRetries = 3;
+      const retryDelay = 100; // 100ms delay between retries
+      
+      if (sourceTabId) {
+        chrome.tabs.get(sourceTabId, (tab) => {
+          if (chrome.runtime.lastError || !tab) {
+            console.warn(`[background.js] Source tab ${sourceTabId} no longer exists, using active tab as fallback`);
+            chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
+              if (!tabs[0]) {
+                sendResponse({ data: [] });
+                return;
+              }
+              
+              getSessionDataForTab(tabs[0], (sessionData) => {
+                // If no session data found and we haven't exhausted retries, try again
+                if (sessionData.length === 0 && retryCount < maxRetries) {
+                  console.log(`[background.js] No session data found (fallback), retrying in ${retryDelay}ms (attempt ${retryCount + 1}/${maxRetries + 1})`);
+                  setTimeout(() => {
+                    attemptGetSessionData(retryCount + 1);
+                  }, retryDelay);
+                } else {
+                  console.log(`[background.js] Sending response with ${sessionData.length} requests from fallback tab (attempt ${retryCount + 1})`);
+                  sendResponse({ data: sessionData });
+                }
+              });
+            });
+            return;
+          }
+          
+          getSessionDataForTab(tab, (sessionData) => {
+            // If no session data found and we haven't exhausted retries, try again
+            if (sessionData.length === 0 && retryCount < maxRetries) {
+              console.log(`[background.js] No session data found for source tab ${sourceTabId}, retrying in ${retryDelay}ms (attempt ${retryCount + 1}/${maxRetries + 1})`);
+              setTimeout(() => {
+                attemptGetSessionData(retryCount + 1);
+              }, retryDelay);
+            } else {
+              console.log(`[background.js] Sending response with ${sessionData.length} requests for source tab ${sourceTabId} (attempt ${retryCount + 1})`);
+              sendResponse({ data: sessionData });
+            }
+          });
+        });
+      } else {
+        // Fallback to active tab if no popup ID provided
+        console.warn(`[background.js] No popup ID provided, using active tab as fallback`);
+        chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
+          if (!tabs[0]) {
+            sendResponse({ data: [] });
+            return;
+          }
+          
+          getSessionDataForTab(tabs[0], (sessionData) => {
+            // If no session data found and we haven't exhausted retries, try again
+            if (sessionData.length === 0 && retryCount < maxRetries) {
+              console.log(`[background.js] No session data found (active tab fallback), retrying in ${retryDelay}ms (attempt ${retryCount + 1}/${maxRetries + 1})`);
+              setTimeout(() => {
+                attemptGetSessionData(retryCount + 1);
+              }, retryDelay);
+            } else {
+              console.log(`[background.js] Sending response with ${sessionData.length} requests from active tab fallback (attempt ${retryCount + 1})`);
+              sendResponse({ data: sessionData });
+            }
+          });
+        });
+      }
+    }
+    
+    attemptGetSessionData();
+    return true; // Keep message channel open for async response
 
-  // Clear all captured request data
+  // Clear specific session or all data
   } else if (message.action === 'clearNetworkData') {
-    for (const key in requests) delete requests[key];
+    if (message.sessionId) {
+      // Clear specific session
+      if (sessions[message.sessionId]) {
+        delete sessions[message.sessionId];
+        console.log(`[background.js] Cleared session: ${message.sessionId}`);
+      }
+    } else {
+      // Clear all sessions
+      for (const key in sessions) delete sessions[key];
+      console.log('[background.js] Cleared all sessions');
+    }
+    
     lastPopupRequestTime = 0; // Reset throttle
-    // Clear storage as well
-    chrome.storage.local.set({
-      [STORAGE_KEY]: {}
-    }, () => {
-      console.log('[background.js] Cleared storage');
-    });
+    saveSessionsToStorage();
     sendResponse({ success: true });
 
   // Cache environment info sent by content script
@@ -408,7 +739,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
       }
       
-      requests[syntheticId] = {
+      // Create synthetic request and store in appropriate session
+      const syntheticRequest = {
         requestId: syntheticId,
         url: absoluteUrl,
         method: responseData.method,
@@ -421,29 +753,99 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         isLogonUserCapture: true, // Flag to identify these special captures
         q2token: responseData.q2token // Include session ID from the captured request
       };
-      console.log('[background.js] Created new logonUser capture entry:', syntheticId, 'with session ID:', responseData.q2token);
+      
+      // Store in the appropriate session
+      const sessionId = responseData.q2token || 'captured_' + Date.now();
+      const session = getOrCreateSession(sessionId);
+      if (session) {
+        session.requests[syntheticId] = syntheticRequest;
+        console.log(`[background.js] Created synthetic logonUser request in session ${sessionId}:`, syntheticId);
+      }
     }
     
-    saveRequestsToStorage(); // Persist to storage
+    saveSessionsToStorage(); // Persist to storage
     sendResponse({ success: true });
 
   // Handle logonUser response body capture from injected script
   } else if (message.type === 'LOGON_USER_RESPONSE_CAPTURED') {
     const responseData = message.data;
     
-    // Find the matching request by requestId
-    const matchingRequest = requests[responseData.requestId];
+    // Find the matching request in any session
+    let matchingRequest = null;
+    let parentSession = null;
+    
+    for (const [sessionId, session] of Object.entries(sessions)) {
+      if (session.requests[responseData.requestId]) {
+        matchingRequest = session.requests[responseData.requestId];
+        parentSession = session;
+        console.log(`[background.js] Found matching request in session ${sessionId}`);
+        break;
+      }
+    }
     
     if (matchingRequest) {
       // Add response body to existing request
       matchingRequest.responseBody = responseData.responseBody;
       matchingRequest.capturedAt = responseData.timestamp;
+      matchingRequest.isLogonUserCapture = true; // Mark as captured
       console.log('[background.js] Captured response body for logonUser request:', responseData.requestId);
-      saveRequestsToStorage(); // Persist to storage
+      saveSessionsToStorage(); // Persist to storage
     } else {
       console.warn('[background.js] No matching request found for captured response:', responseData.requestId);
     }
     
     sendResponse({ success: true });
+
+  // Handle HAR data import
+  } else if (message.action === 'importHARData') {
+    if (message.data && Array.isArray(message.data)) {
+      console.log('[background.js] Importing', message.data.length, 'HAR entries');
+      
+      // Group imported data by session ID (q2token)
+      const importedSessions = {};
+      
+      message.data.forEach(entry => {
+        const sessionId = entry.q2token || 'imported_session_' + Date.now();
+        
+        if (!importedSessions[sessionId]) {
+          importedSessions[sessionId] = {
+            requests: {},
+            envInfo: null,
+            lastActivity: Date.now(),
+            createdAt: Date.now()
+          };
+        }
+        
+        importedSessions[sessionId].requests[entry.requestId] = entry;
+      });
+      
+      // Merge with existing sessions
+      Object.assign(sessions, importedSessions);
+      
+      // Save to storage
+      saveSessionsToStorage();
+      
+      const totalRequests = Object.values(sessions).reduce((sum, session) => 
+        sum + Object.keys(session.requests).length, 0);
+      
+      console.log('[background.js] Successfully imported HAR data. Total sessions:', Object.keys(sessions).length, 'Total requests:', totalRequests);
+      sendResponse({ success: true, imported: message.data.length });
+    } else {
+      console.error('[background.js] Invalid HAR import data');
+      sendResponse({ success: false, error: 'Invalid data format' });
+    }
+  
+  // Get session information for debugging
+  } else if (message.action === 'getSessionInfo') {
+    const sessionInfo = {
+      totalSessions: Object.keys(sessions).length,
+      sessions: Object.entries(sessions).map(([sessionId, session]) => ({
+        sessionId: sessionId,
+        requestCount: Object.keys(session.requests).length,
+        lastActivity: session.lastActivity,
+        createdAt: session.createdAt
+      }))
+    };
+    sendResponse(sessionInfo);
   }
 });

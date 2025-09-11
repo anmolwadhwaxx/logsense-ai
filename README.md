@@ -14,6 +14,27 @@
 - **Complete header preservation** including authentication tokens, cookies, and custom headers
 - **Request/response body capture** for detailed debugging and HAR export compatibility
 - **Fi_no extraction** from CDN deport patterns for enhanced debugging context
+- **Smart duplicate elimination** with priority-based logonUser request deduplication
+
+### **Multi-Tab Interface & Visualization**
+
+- **Network Logs Tab**: Complete session management and request details with collapsible sections
+- **Visualization Tab**: Interactive charts and performance analytics
+  - **Request Timeline**: Real-time timeline visualization of network activity
+  - **Performance Metrics**: Total requests, average response time, error rate, and data transferred
+  - **Request Type Distribution**: Pie charts showing API, JavaScript, CSS, images, and HTML breakdown
+  - **Domain Analysis**: Top 10 domains by request count with visual indicators
+  - **Time Range Filtering**: 5 minutes, 15 minutes, 1 hour, or all-time views
+- **Settings Tab**: Centralized configuration for capture options, export settings, and site management
+
+### **Interactive Performance Analytics**
+
+- **Real-time metrics calculation** with automatic updates every 2 seconds
+- **Canvas-based charting** for lightweight, responsive visualizations
+- **Request categorization** with intelligent type detection (API, JS, CSS, Images, HTML)
+- **Performance heatmaps** showing response time distributions across domains
+- **Data transfer analytics** with byte formatting and transfer rate calculations
+- **Error rate monitoring** with visual indicators for failed requests
 
 ### **Multi-Platform Alexandria Integration**
 
@@ -35,17 +56,21 @@
 
 ### **Enhanced User Experience**
 
-- **Modern responsive design** with flexbox layout optimized for 400px popup width
+- **Modern tabbed interface** with intuitive navigation and visual feedback
+- **Responsive design** optimized for 450px popup width with flexible layouts
 - **Color-coded platform access** for instant visual identification of log sources
 - **Collapsible interface sections** for efficient space utilization and workflow optimization
-- **Professional styling** with consistent visual hierarchy and spacing
+- **Professional styling** with consistent visual hierarchy and modern aesthetics
 - **Enhanced text handling** with proper word wrapping, overflow management, and readability
 - **Loading state management** to prevent UI flickering and improve perceived performance
 - **Anti-flicker optimizations** with transition and animation prevention during load
+- **Custom popup resizing** with drag functionality and responsive content adaptation
 
 ### **Advanced Export & Integration**
 
 - **HAR (HTTP Archive) format export** with full compliance to HAR 1.2 specification standards
+- **CSV summary export** for simplified spreadsheet analysis (basic request data: URL, method, status, timing, Q2 tokens)
+- **HAR import functionality** for analysis of external capture files
 - **JSON data export** with structured session data for custom analysis tools
 - **Complete session preservation** including timing, headers, and payload data
 - **Developer-friendly formats** compatible with standard debugging and analysis tools

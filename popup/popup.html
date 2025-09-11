@@ -8,31 +8,20 @@
 </head>
 <body>
     <div id="container">
-        <div class="form-row">
-            <button id="clear-button">Clear Data</button>
+        <!-- Tab Navigation -->
+        <div class="tab-navigation">
+            <button class="tab-button active" data-tab="logs">Network Logs</button>
+            <button class="tab-button" data-tab="user-details">User Details</button>
+            <button class="tab-button" data-tab="visualization">Visualization</button>
+            <button class="tab-button" data-tab="settings">Settings</button>
         </div>
-        <div class="form-row">
-            <label for="user-utc-offset">UTC Offset:</label>
-            <input type="text" id="user-utc-offset" value="-0700" maxlength="6" style="width:70px;">
-            <button id="set-utc-offset">Set</button>
-        </div>
-        <div class="form-row">
-            <label for="site-selector">Site:</label>
-            <select id="site-selector" style="flex: 1; min-width: 150px;"></select>
-        </div>
-        <div class="form-row">
-            <input type="text" id="site-input" placeholder="Enter site URL" style="flex: 1;">
-            <button id="add-site">Add Site</button>
-        </div>
-        <div class="form-row">
-            <label for="side-selector">Side:</label>
-            <select id="side-selector">
-                <option value="Client">Client</option>
-                <option value="Server">Server</option>
-                <option value="Other">Other</option>
-            </select>
-            <input type="text" id="custom-side" placeholder="Custom side" style="display:none;width:100px;">
-        </div>
+
+        <!-- Network Logs Tab -->
+        <div id="logs-tab" class="tab-content active">
+            <div class="quick-actions">
+                <button id="clear-button">Clear Data</button>
+                <button id="download-json">Download Full HAR Log</button>
+            </div>
 		
 		<div class="collapsible-section">
 			<button class="collapsible">Show Environment Info</button>
@@ -58,9 +47,202 @@
 				</div>
 			</div>
 		</div>
+        </div>
 
-		<h2>Actions</h2>
-		<button id="download-json">Download Full HAR Log</button>
+        <!-- User Details Tab -->
+        <div id="user-details-tab" class="tab-content">
+            <div class="user-status-indicator">
+                <span id="user-status-text">No user data available</span>
+                <button id="refresh-user-data">🔄 Refresh</button>
+            </div>
+
+            <!-- User Profile Section -->
+            <div class="user-section">
+                <h3>👤 User Profile</h3>
+                <div class="user-profile-content">
+                    <div class="user-info-grid">
+                        <!-- Profile data will be populated here -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Session Information -->
+            <div class="user-section">
+                <h3>⏰ Session Details</h3>
+                <div class="user-session-content">
+                    <div class="user-info-grid">
+                        <!-- Session data will be populated here -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Capabilities & Permissions -->
+            <div class="user-section">
+                <h3>🔐 Capabilities & Permissions</h3>
+                <div class="capabilities-tabs">
+                    <button class="capability-tab active" data-capability="features">Feature Flags</button>
+                    <button class="capability-tab" data-capability="transactions">Transaction Rights</button>
+                    <button class="capability-tab" data-capability="system">System Flags</button>
+                </div>
+                <div id="capabilities-content">
+                    <div id="features-content" class="capability-content active">
+                        <div class="capability-grid">
+                            <!-- Features will be populated here -->
+                        </div>
+                    </div>
+                    <div id="transaction-rights-content" class="capability-content">
+                        <div class="capability-grid">
+                            <!-- Transaction rights will be populated here -->
+                        </div>
+                    </div>
+                    <div id="system-content" class="capability-content">
+                        <div class="capability-grid">
+                            <!-- System flags will be populated here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Environment Context -->
+            <div class="user-section">
+                <h3>🎨 Environment Context</h3>
+                <div class="environment-content">
+                    <div id="environment-data">No environment data available.</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Visualization Tab -->
+        <div id="visualization-tab" class="tab-content">
+            <div class="visualization-controls">
+                <div class="current-site-indicator">
+                    <strong>Analyzing:</strong> <span id="current-site-name">Loading...</span>
+                </div>
+                <div class="viz-controls-right">
+                    <button id="refresh-viz">Refresh Charts</button>
+                    <select id="time-range">
+                        <option value="5m">Last 5 minutes</option>
+                        <option value="15m">Last 15 minutes</option>
+                        <option value="1h">Last hour</option>
+                        <option value="all">All time</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Network Timeline -->
+            <div class="viz-section">
+                <h3>Request Timeline</h3>
+                <div id="timeline-chart" class="chart-container">
+                    <canvas id="timeline-canvas"></canvas>
+                </div>
+            </div>
+
+            <!-- Performance Metrics -->
+            <div class="viz-section">
+                <h3>Performance Overview</h3>
+                <div class="metrics-grid">
+                    <div class="metric-card">
+                        <h4>Total Requests</h4>
+                        <span id="total-requests" class="metric-value">0</span>
+                    </div>
+                    <div class="metric-card">
+                        <h4>Average Response Time</h4>
+                        <span id="avg-response-time" class="metric-value">0ms</span>
+                    </div>
+                    <div class="metric-card">
+                        <h4>Error Rate</h4>
+                        <span id="error-rate" class="metric-value">0%</span>
+                    </div>
+                    <div class="metric-card">
+                        <h4>Data Transferred</h4>
+                        <span id="data-transferred" class="metric-value">0 KB</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Request Type Distribution -->
+            <div class="viz-section">
+                <h3>Request Types</h3>
+                <div id="request-types-chart" class="chart-container">
+                    <canvas id="types-canvas"></canvas>
+                </div>
+            </div>
+
+            <!-- Domain Analysis -->
+            <div class="viz-section">
+                <h3>Top Endpoints</h3>
+                <div id="domain-chart" class="chart-container">
+                    <div id="domain-list"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Settings Tab -->
+        <div id="settings-tab" class="tab-content">
+            <div class="settings-section">
+                <h3>Time Configuration</h3>
+                <div class="form-row">
+                    <label for="user-utc-offset">UTC Offset:</label>
+                    <input type="text" id="user-utc-offset" value="-0700" maxlength="6" style="width:70px;">
+                    <button id="set-utc-offset">Set</button>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <h3>Site Management</h3>
+                <div class="form-row">
+                    <label for="site-selector">Site:</label>
+                    <select id="site-selector" style="flex: 1; min-width: 150px;"></select>
+                </div>
+                <div class="form-row">
+                    <input type="text" id="site-input" placeholder="Enter site URL" style="flex: 1;">
+                    <button id="add-site">Add Site</button>
+                </div>
+                <div class="form-row">
+                    <label for="side-selector">Side:</label>
+                    <select id="side-selector">
+                        <option value="Client">Client</option>
+                        <option value="Server">Server</option>
+                        <option value="Other">Other</option>
+                    </select>
+                    <input type="text" id="custom-side" placeholder="Custom side" style="display:none;width:100px;">
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <h3>Capture Options</h3>
+                <div class="form-row">
+                    <label>
+                        <input type="checkbox" id="capture-responses" checked>
+                        Capture Response Bodies
+                    </label>
+                </div>
+                <div class="form-row">
+                    <label>
+                        <input type="checkbox" id="auto-dedupe" checked>
+                        Auto-deduplicate Logon Requests
+                    </label>
+                </div>
+                <div class="form-row">
+                    <label>
+                        <input type="checkbox" id="show-timing" checked>
+                        Show Request Timing
+                    </label>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <h3>Export Options</h3>
+                <div class="form-row">
+                    <button id="export-har">Export as HAR</button>
+                    <button id="export-csv">Export Summary as CSV</button>
+                </div>
+                <div class="form-row">
+                    <button id="import-har">Import HAR File</button>
+                    <input type="file" id="har-file-input" accept=".har" style="display:none;">
+                </div>
+            </div>
+        </div>
     </div>
     <script src="popup.js"></script>
 </body>

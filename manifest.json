@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Q2 Easy Log",
-  "version": "1.0",
+  "version": "3.0.0",
   "description": "A Chrome extension that prepares debug log URL for Q2 UUX activities",
   "permissions": [
     "tabs",
