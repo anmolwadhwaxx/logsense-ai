@@ -1807,8 +1807,6 @@ function initCapabilityTabs() {
   const tabs = document.querySelectorAll('.capability-tab');
   const contents = document.querySelectorAll('.capability-content');
   
-  console.log('[popup.js] Initializing capability tabs:', tabs.length, 'tabs found');
-  
   // Remove any existing event listeners
   tabs.forEach((tab, index) => {
     tab.classList.remove('active');
@@ -1816,20 +1814,18 @@ function initCapabilityTabs() {
     const newTab = tab.cloneNode(true);
     tab.parentNode.replaceChild(newTab, tab);
   });
-  
+
   contents.forEach(content => {
     content.classList.remove('active');
   });
-  
+
   // Get fresh references after cloning
   const freshTabs = document.querySelectorAll('.capability-tab');
   const freshContents = document.querySelectorAll('.capability-content');
-  
+
   // Add event listeners
   freshTabs.forEach(tab => {
     tab.addEventListener('click', () => {
-      console.log('[popup.js] Capability tab clicked:', tab.dataset.capability);
-      
       // Remove active from all
       freshTabs.forEach(t => t.classList.remove('active'));
       freshContents.forEach(c => c.classList.remove('active'));
@@ -1842,50 +1838,29 @@ function initCapabilityTabs() {
       }
     });
   });
-  
+
   // Set first tab as active
   if (freshTabs.length > 0 && freshContents.length > 0) {
     freshTabs[0].classList.add('active');
     freshContents[0].classList.add('active');
   }
-}
-
-// Load user details data
+}// Load user details data
 function loadUserDetailsData() {
   console.log('[popup.js] Loading user details data...');
-  console.log('[popup.js] Current session data check:', {
-    hasCurrentSessionData: !!currentSessionData,
-    sessionId: currentSessionData?.sessionId,
-    hasRequests: !!(currentSessionData?.requests),
-    requestCount: currentSessionData?.requests?.length || 0
-  });
   
   // Use the same session-filtered data that the Network Logs tab uses
   if (!currentSessionData || !currentSessionData.requests) {
-    console.log('[popup.js] No current session data available for user details, attempting to load fresh data...');
+    console.log('[popup.js] No current session data available, attempting to load fresh data...');
     
     // Fallback: try to get fresh data if session data not yet available
     getNetworkData((response) => {
-      console.log('[popup.js] Fallback getNetworkData response:', {
-        hasResponse: !!response,
-        hasData: !!(response && response.data),
-        dataLength: response?.data?.length || 0
-      });
-      
       if (response && response.data && response.data.length > 0) {
         // Create temporary session summary to get session-filtered data
         chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
           const activeDomain = tabs[0] ? new URL(tabs[0].url).hostname : null;
-          console.log('[popup.js] Active domain for session creation:', activeDomain);
           
           if (activeDomain) {
             const tempSessionSummary = createSessionSummary(response.data, activeDomain);
-            console.log('[popup.js] Temporary session summary:', {
-              hasSessionSummary: !!tempSessionSummary,
-              sessionId: tempSessionSummary?.sessionId,
-              hasRequests: !!(tempSessionSummary?.requests),
-              requestCount: tempSessionSummary?.requests?.length || 0
-            });
             
             if (tempSessionSummary && tempSessionSummary.requests) {
               console.log('[popup.js] Created temporary session summary for user details');
@@ -1901,27 +1876,12 @@ function loadUserDetailsData() {
     return;
   }
   
-  console.log('[popup.js] Using current session data for user details:', {
-    sessionId: currentSessionData.sessionId,
-    requestCount: currentSessionData.requests.length
-  });
   loadUserDetailsFromRequests(currentSessionData.requests, currentSessionData.sessionId);
 }
 
 // Helper function to load user details from a set of requests
 function loadUserDetailsFromRequests(requests, sessionId) {
-  console.log('[popup.js] Loading user details from requests:', {
-    sessionId: sessionId,
-    totalRequests: requests.length
-  });
-  
-  // Debug: Log all request URLs to see what we have
-  console.log('[popup.js] Available request URLs:', requests.map(req => ({
-    url: req.url,
-    hasResponseBody: !!req.responseBody,
-    isLogonUserCapture: req.isLogonUserCapture,
-    method: req.method
-  })));
+  console.log('[popup.js] Loading user details from requests for session:', sessionId, 'with', requests.length, 'requests');
   
   // Filter for logonUser requests with response bodies from the CURRENT SESSION only
   const logonUserRequests = requests.filter(req => 
@@ -1929,37 +1889,7 @@ function loadUserDetailsFromRequests(requests, sessionId) {
     req.responseBody
   );
   
-  console.log('[popup.js] Found', logonUserRequests.length, 'logonUser requests with response bodies in session:', sessionId);
-  
-  // Debug: Log details of logonUser requests found
-  logonUserRequests.forEach((req, index) => {
-    console.log(`[popup.js] LogonUser request ${index + 1}:`, {
-      url: req.url,
-      hasResponseBody: !!req.responseBody,
-      responseBodyLength: req.responseBody?.length || 0,
-      isLogonUserCapture: req.isLogonUserCapture,
-      startTime: req.startTime
-    });
-    
-    // Try to parse the response body to see what's in it
-    if (req.responseBody) {
-      try {
-        const parsed = JSON.parse(req.responseBody);
-        console.log(`[popup.js] LogonUser request ${index + 1} parsed data:`, {
-          hasData: !!parsed.data,
-          hasCapabilities: !!(parsed.data?.capabilities),
-          hasTransactionRights: !!(parsed.data?.capabilities?.transactionRights),
-          transactionRightsCount: parsed.data?.capabilities?.transactionRights ? Object.keys(parsed.data.capabilities.transactionRights).length : 0,
-          hasFeatures: !!(parsed.data?.capabilities?.features),
-          featuresCount: parsed.data?.capabilities?.features?.length || 0,
-          firstName: parsed.data?.firstName,
-          lastName: parsed.data?.lastName
-        });
-      } catch (e) {
-        console.log(`[popup.js] LogonUser request ${index + 1} parse error:`, e.message);
-      }
-    }
-  });
+  console.log('[popup.js] Found', logonUserRequests.length, 'logonUser requests with response bodies');
   
   if (logonUserRequests.length > 0) {
     // Use the same prioritization logic as displayIndividualRequests
@@ -1977,37 +1907,16 @@ function loadUserDetailsFromRequests(requests, sessionId) {
       return (b.startTime || 0) - (a.startTime || 0);
     })[0];
     
-    console.log('[popup.js] Selected best logonUser request:', {
-      url: bestRequest.url,
-      isLogonUserCapture: bestRequest.isLogonUserCapture,
-      score: bestRequest.isLogonUserCapture && bestRequest.responseBody ? 3 : 
-             bestRequest.isLogonUserCapture ? 2 : 1
-    });
-    
     try {
       const userData = JSON.parse(bestRequest.responseBody);
-      console.log('[popup.js] Successfully parsed user data for User Details tab (session:', sessionId, ')');
-      console.log('[popup.js] User data structure:', {
-        hasData: !!userData.data,
-        dataKeys: userData.data ? Object.keys(userData.data) : [],
-        hasCapabilities: !!(userData.data?.capabilities),
-        capabilityKeys: userData.data?.capabilities ? Object.keys(userData.data.capabilities) : []
-      });
-      
+      console.log('[popup.js] Successfully parsed user data for User Details tab');
       populateUserDetailsTab(userData.data || userData);
     } catch (error) {
       console.error('[popup.js] Error parsing logonUser response:', error);
-      console.error('[popup.js] Response body that failed to parse:', bestRequest.responseBody?.substring(0, 200) + '...');
       populateUserDetailsTab(null);
     }
   } else {
-    console.log('[popup.js] No logonUser data found in session:', sessionId);
-    console.log('[popup.js] Available requests summary:', {
-      total: requests.length,
-      withResponseBody: requests.filter(req => req.responseBody).length,
-      logonUserUrls: requests.filter(req => req.url?.includes('logonUser')).length,
-      logonUserCaptures: requests.filter(req => req.isLogonUserCapture).length
-    });
+    console.log('[popup.js] No logonUser data found in session requests');
     populateUserDetailsTab(null);
   }
 }
@@ -2105,8 +2014,6 @@ function populateEnvironmentContext(userData) {
   const environmentEl = document.getElementById('environment-data');
   if (!environmentEl) return;
   
-  console.log('[popup.js] Populating environment context with user data');
-  
   // Extract environment information from user data
   const environmentInfo = [];
   
@@ -2160,11 +2067,9 @@ function populateEnvironmentContext(userData) {
 
 // Populate user capabilities
 function populateUserCapabilities(userData) {
-  console.log('[popup.js] User capabilities data:', userData.capabilities);
+  console.log('[popup.js] Populating user capabilities');
   
   if (userData.capabilities) {
-    console.log('[popup.js] Features data:', userData.capabilities.features);
-    console.log('[popup.js] Transaction rights data:', userData.capabilities.transactionRights);
     populateFeatures(userData.capabilities.features || []);
     populateTransactionRights(userData.capabilities.transactionRights || {});
     populateSystemFlags(userData.capabilities);
@@ -2189,8 +2094,7 @@ function populateFeatures(features) {
     return;
   }
   
-  console.log('[popup.js] Populating features:', features);
-  console.log('[popup.js] Sample feature structure:', features[0]);
+  console.log('[popup.js] Populating', features.length, 'features');
   
   grid.innerHTML = features.map((feature, index) => {
     // Handle different possible feature structures
@@ -2215,8 +2119,6 @@ function populateFeatures(features) {
       featureName = feature;
       featureValue = true; // Assume string features are enabled
     }
-    
-    console.log(`[popup.js] Feature ${index}:`, { name: featureName, value: featureValue, original: feature });
     
     return `
       <div class="capability-item">
@@ -2295,32 +2197,19 @@ function populateTransactionRights(transactionRights) {
   const grid = content.querySelector('.capability-grid');
   if (!grid) return;
   
-  console.log('[popup.js] populateTransactionRights called with:', {
-    transactionRights: transactionRights,
-    type: typeof transactionRights,
-    isNull: transactionRights === null,
-    isUndefined: transactionRights === undefined,
-    keys: transactionRights ? Object.keys(transactionRights) : 'N/A',
-    keyCount: transactionRights ? Object.keys(transactionRights).length : 0
-  });
-  
   if (!transactionRights || Object.keys(transactionRights).length === 0) {
-    console.log('[popup.js] No transaction rights - showing empty message');
+    console.log('[popup.js] No transaction rights available');
     grid.innerHTML = '<div class="capability-item">No transaction rights available</div>';
     return;
   }
   
-  console.log('[popup.js] Populating transaction rights with data:', transactionRights);
-  console.log('[popup.js] Transaction rights entries:', Object.entries(transactionRights));
+  console.log('[popup.js] Populating transaction rights with', Object.keys(transactionRights).length, 'entries');
   
   grid.innerHTML = Object.entries(transactionRights).map(([name, details]) => {
-    console.log('[popup.js] Processing transaction right:', { name, details, detailsType: typeof details });
-    
     const displayName = formatTransactionRightName(name);
     
     // Handle different possible transaction right structures
     if (typeof details === 'boolean') {
-      console.log('[popup.js] Transaction right', name, 'is boolean:', details);
       return `
         <div class="capability-item">
           <div class="capability-name">${displayName}</div>
@@ -2330,8 +2219,6 @@ function populateTransactionRights(transactionRights) {
         </div>
       `;
     } else if (typeof details === 'object' && details !== null) {
-      console.log('[popup.js] Transaction right', name, 'is detailed object:', details);
-      
       // Enhanced display for detailed transaction rights objects
       const enabled = details.enabled || false;
       const viewLevel = details.view !== undefined ? details.view : 'N/A';
@@ -2342,10 +2229,6 @@ function populateTransactionRights(transactionRights) {
         (details.dualAuthLimit === -1 ? 'No Limit' : 
          details.dualAuthLimit === 0 ? 'Not Allowed' : 
          `$${details.dualAuthLimit.toLocaleString()}`) : 'N/A';
-      
-      console.log('[popup.js] Transaction right processed details:', {
-        name, enabled, viewLevel, canDraft, canAuthorize, canCancel, dualAuthLimit
-      });
       
       // Interpret view level
       const getViewDescription = (level) => {
@@ -2394,7 +2277,7 @@ function populateTransactionRights(transactionRights) {
     }
     
     // Fallback for unknown types
-    console.log('[popup.js] Transaction right', name, 'has unknown type:', typeof details, details);
+    console.warn('[popup.js] Unknown transaction right type:', typeof details, 'for', name);
     return `
       <div class="capability-item">
         <div class="capability-name">${displayName}</div>
@@ -2402,8 +2285,6 @@ function populateTransactionRights(transactionRights) {
       </div>
     `;
   }).join('');
-  
-  console.log('[popup.js] Transaction rights HTML generated and inserted');
 }
 
 // Helper function to format transaction right names into readable text
