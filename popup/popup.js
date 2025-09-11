@@ -1,4 +1,4 @@
-﻿let currentTabId = null;
+let currentTabId = null;
 let currentSessionData = null; // Store session data until sessionId changes
 let isInitialized = false; // Prevent multiple initializations
 let lastDataHash = null; // Track data changes to prevent unnecessary re-renders
@@ -832,20 +832,13 @@ function initializePopup() {
         logonUserContext = ` (${requestSource}${wsParam ? ', ' + wsParam : ''}${timeFromStart ? ', ' + timeFromStart : ''})`;
       }
       
-      // Extract user data from logonUser response body
-      let userDataSummary = '';
-      if (isLogonUser && hasResponseBody) {
-        userDataSummary = extractLogonUserData(entry.responseBody);
-      }
-      
       console.log('[popup.js] Request flags:', { 
         isLogonUser: isLogonUser, 
         hasResponseBody: hasResponseBody,
         url: url,
         urlIncludesLogonUser: url.includes('logonUser?'),
         entryIsLogonUserCapture: entry.isLogonUserCapture,
-        logonUserContext: logonUserContext,
-        hasUserData: !!userDataSummary
+        logonUserContext: logonUserContext
       });
       
       // Create unique ID for collapsible response body
@@ -858,17 +851,17 @@ function initializePopup() {
             <strong>Status:</strong> <span style="color: ${statusColor}; font-weight: bold;">${status}</span> | 
             <strong>Time:</strong> ${time}ms | 
             <strong>Started:</strong> ${startTime} GMT
-            ${isLogonUser ? `<br><span class="logon-user-badge">ðŸ” LogonUser Request${logonUserContext}</span>` : ''}
-            ${userDataSummary ? `<br><div class="user-data-summary">${userDataSummary}</div>` : ''}
+            ${isLogonUser ? `<br><span class="logon-user-badge">🔐 LogonUser Request${logonUserContext}</span>` : ''}
+
             ${hasResponseBody ? `
               <br><button class="response-body-toggle" data-response-id="${responseBodyId}">
-                ðŸ“„ View Response Body
+                📄 View Response Body
               </button>
               <div id="${responseBodyId}" class="response-body-content" style="display: none;">
                 <div class="response-body-header">
                   LogonUser Response Body
                   <button class="download-response-btn" data-response-data="${escapeHtml(JSON.stringify(entry.responseBody))}" data-url="${escapeHtml(entry.url)}">
-                    ðŸ’¾ Download JSON
+                    💾 Download JSON
                   </button>
                 </div>
                 <pre class="response-body-text">${formatJsonResponse(entry.responseBody)}</pre>
@@ -1037,11 +1030,11 @@ function initializePopup() {
     
     if (element.style.display === 'none') {
       element.style.display = 'block';
-      button.textContent = 'ðŸ“„ Hide Response Body';
+      button.textContent = '📄 Hide Response Body';
       button.classList.add('active');
     } else {
       element.style.display = 'none';
-      button.textContent = 'ðŸ“„ View Response Body';
+      button.textContent = '📄 View Response Body';
       button.classList.remove('active');
     }
   };
@@ -1094,7 +1087,7 @@ function addSessionDebugInfo() {
       chrome.tabs.get(sourceTabId, (tab) => {
         if (chrome.runtime.lastError || !tab) {
           debugDiv.innerHTML = `
-            <strong>🔍 Session Debug</strong><br>
+            <strong>?? Session Debug</strong><br>
             <strong>Popup ID:</strong> ${popupId || 'None'}<br>
             <strong>Source Tab:</strong> ${sourceTabId} (CLOSED)<br>
             <strong>Status:</strong> <span style="color: #ff6b6b;">Tab closed - using fallback</span><br>
@@ -1115,7 +1108,7 @@ function addSessionDebugInfo() {
             const currentSession = sessionInfo.sessions.find(s => s.sessionId === q2token);
             
             debugDiv.innerHTML = `
-              <strong>🔍 Session Debug (Isolated)</strong><br>
+              <strong>?? Session Debug (Isolated)</strong><br>
               <strong>Popup ID:</strong> ${popupId}<br>
               <strong>Source Tab:</strong> ${sourceTabId}<br>
               <strong>Domain:</strong> ${domain}<br>
@@ -1125,7 +1118,7 @@ function addSessionDebugInfo() {
               <strong>Current Tab:</strong> ${currentActiveTab}<br>
               <strong>Session Data:</strong> ${currentSessionData ? `${currentSessionData.requests?.length || 0} reqs` : 'None'}<br>
               <strong>Hash:</strong> ${lastDataHash?.substring(0, 8) || 'none'}<br>
-              <span style="color: #4CAF50;">✓ Tab isolation active</span><br>
+              <span style="color: #4CAF50;">? Tab isolation active</span><br>
               <small style="color: #aaa;">Updated: ${new Date().toLocaleTimeString()}</small>
             `;
           });
@@ -1133,10 +1126,10 @@ function addSessionDebugInfo() {
       });
     } else {
       debugDiv.innerHTML = `
-        <strong>🔍 Session Debug</strong><br>
+        <strong>?? Session Debug</strong><br>
         <strong>Popup ID:</strong> ${popupId || 'Initializing...'}<br>
         <strong>Source Tab:</strong> ${sourceTabId || 'Detecting...'}<br>
-        <span style="color: #ffa500;">⚠ Initialization in progress</span><br>
+        <span style="color: #ffa500;">? Initialization in progress</span><br>
         <small style="color: #aaa;">Updated: ${new Date().toLocaleTimeString()}</small>
       `;
     }
@@ -1374,7 +1367,7 @@ function filterDataByDomain(data, targetDomain) {
     const entryDomain = getDomain(entry.url || '');
     const matches = entryDomain === targetDomain;
     if (matches) {
-      console.log('[popup.js] Domain match:', entry.url, 'â†’', entryDomain);
+      console.log('[popup.js] Domain match:', entry.url, '→', entryDomain);
     }
     return matches;
   });
@@ -1750,24 +1743,24 @@ function extractLogonUserData(responseBody) {
     const lines = [];
     
     if (userInfo.user) {
-      lines.push(`ðŸ‘¤ <strong>${userInfo.user}</strong> (ID: ${userInfo.userId})`);
+      lines.push(`👤 <strong>${userInfo.user}</strong> (ID: ${userInfo.userId})`);
     }
     
     if (userInfo.loginName) {
-      lines.push(`ðŸ”‘ Login: ${userInfo.loginName}`);
+      lines.push(`🔑 Login: ${userInfo.loginName}`);
     }
     
     if (userInfo.customerId) {
-      lines.push(`ðŸ¢ Customer: ${userInfo.customerId} | Group: ${userInfo.groupId}`);
+      lines.push(`🏢 Customer: ${userInfo.customerId} | Group: ${userInfo.groupId}`);
     }
     
     if (userInfo.theme) {
-      lines.push(`ðŸŽ¨ Theme: ${userInfo.theme} | TZ: ${userInfo.timeZone} (${userInfo.utcOffset})`);
+      lines.push(`🎨 Theme: ${userInfo.theme} | TZ: ${userInfo.timeZone} (${userInfo.utcOffset})`);
     }
     
     if (userInfo.sessionExpires) {
       const expireTime = new Date(userInfo.sessionExpires).toLocaleString();
-      lines.push(`â° Session expires: ${expireTime} (timeout: ${userInfo.sessionTimeout})`);
+      lines.push(`⏰ Session expires: ${expireTime} (timeout: ${userInfo.sessionTimeout})`);
     }
     
     // Status flags
@@ -1777,28 +1770,28 @@ function extractLogonUserData(responseBody) {
     if (userInfo.isCSR) flags.push('CSR');
     if (userInfo.isNewUser) flags.push('New User');
     if (flags.length > 0) {
-      lines.push(`ðŸš© Flags: ${flags.join(', ')}`);
+      lines.push(`🚩 Flags: ${flags.join(', ')}`);
     }
     
     // Capabilities summary
     if (totalFeatures > 0) {
-      lines.push(`âš¡ Features: ${enabledFeatures}/${totalFeatures} enabled`);
+      lines.push(`⚡ Features: ${enabledFeatures}/${totalFeatures} enabled`);
     }
     
     if (totalTransactions > 0) {
-      lines.push(`ðŸ’° Transactions: ${enabledTransactions}/${totalTransactions} enabled`);
+      lines.push(`💰 Transactions: ${enabledTransactions}/${totalTransactions} enabled`);
     }
     
     // Messages
     if (data.messages && data.messages.unread > 0) {
-      lines.push(`ðŸ“¬ Unread messages: ${data.messages.unread}`);
+      lines.push(`📬 Unread messages: ${data.messages.unread}`);
     }
     
     return `<div class="user-data-details">${lines.join('<br>')}</div>`;
     
   } catch (error) {
     console.error('[popup.js] Error parsing logonUser response:', error);
-    return '<div class="user-data-error">âš ï¸ Error parsing user data</div>';
+    return '<div class="user-data-error">⚠️ Error parsing user data</div>';
   }
 }
 
@@ -2270,7 +2263,7 @@ function populateTransactionRights(transactionRights) {
                 <strong>Dual Auth Limit:</strong> <span class="auth-limit">${dualAuthLimit}</span>
               </div>
             ` : ''}
-            ${details.draftRestricted ? '<div class="restriction">⚠ Draft Restricted</div>' : ''}
+            ${details.draftRestricted ? '<div class="restriction">? Draft Restricted</div>' : ''}
           </div>
         </div>
       `;
@@ -2400,3 +2393,4 @@ function clearUserDetailsContent() {
     systemFlagsGrid.innerHTML = '<div class="capability-item">No system flags data available</div>';
   }
 }
+
