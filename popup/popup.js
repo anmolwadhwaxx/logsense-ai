@@ -10,6 +10,14 @@ let currentActiveDomain = null; // Track current domain for visualization filter
 let popupId = null; // Track this popup's unique ID for session isolation
 let sourceTabId = null; // Track which tab this popup was opened from
 
+// Helper: Format timestamps into human-readable GMT string
+function formatDateTime(ts) {
+  if (!ts) return 'N/A';
+  const date = new Date(ts);
+  const pad = n => n.toString().padStart(2, '0');
+  return `${pad(date.getUTCMonth() + 1)}/${pad(date.getUTCDate())}/${date.getUTCFullYear()}:${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}`;
+}
+
 // Helper function to make session-isolated network data requests
 function getNetworkData(callback) {
   chrome.runtime.sendMessage({ 
@@ -39,6 +47,17 @@ function initializePopup() {
     } else {
       console.warn('[popup.js] Failed to initialize popup with background script');
     }
+  });
+
+  // Initialize cached authentication token
+  initializeAuthToken().then(token => {
+    if (token) {
+      console.log('[AUTH] Successfully loaded cached token on popup initialization');
+    } else {
+      console.log('[AUTH] No cached token found on popup initialization');
+    }
+  }).catch(error => {
+    console.warn('[AUTH] Error loading cached token:', error);
   });
 
   // Initialize tab functionality first
@@ -89,14 +108,6 @@ function initializePopup() {
     } catch {
       return 'https:';
     }
-  }
-
-  // Helper: Format timestamps into human-readable GMT string
-  function formatDateTime(ts) {
-    if (!ts) return 'N/A';
-    const date = new Date(ts);
-    const pad = n => n.toString().padStart(2, '0');
-    return `${pad(date.getUTCMonth() + 1)}/${pad(date.getUTCDate())}/${date.getUTCFullYear()}:${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}`;
   }
 
   // Helper: Download HAR file
@@ -646,6 +657,27 @@ function initializePopup() {
     
     const ardentSearchString = `search index="${ardentIndex}" workstationId="${workstationId}" earliest="-15m" | fields * | extract | sort timestamp, seqId | head 10000`;
     const ardentUrl = `https://alexandria.shs.aws.q2e.io/logs/${encodeURIComponent(ardentSearchString)}`;
+
+    // Store search strings globally for environment-specific log summaries
+    window.environmentSearchStrings = {
+      sessionId: summary.sessionId,
+      workstationId: workstationId,
+      isStaging: isStaging,
+      formattedStart: formattedStart,
+      formattedEnd: formattedEnd,
+      indices: {
+        hq: hqIndex,
+        lightbridge: lbIndex,
+        kamino: kaminoIndex,
+        ardent: ardentIndex
+      },
+      searchStrings: {
+        hq: hqSearchString,
+        lightbridge: lbSearchString,
+        kamino: kaminoSearchString,
+        ardent: ardentSearchString
+      }
+    };
 
     sessionSummaryContainer.innerHTML = `
       <div class="session-summary">
@@ -1266,6 +1298,9 @@ function switchToTab(tabName) {
   } else if (tabName === 'user-details') {
     console.log('[popup.js] Switching to user-details tab');
     loadUserDetailsData();
+  } else if (tabName === 'ai-insights') {
+    console.log('[popup.js] Switching to ai-insights tab');
+    initializeAIInsights();
   }
 }
 
@@ -2182,9 +2217,11 @@ function convertCamelCaseToReadable(text) {
     .trim();
 }
 
-// Populate transaction rights
+
+
+// Populate transaction rights - Enhanced version with inline display
 function populateTransactionRights(transactionRights) {
-  const content = document.getElementById('transaction-rights-content');
+  const content = document.getElementById('transactions-content');
   if (!content) return;
   
   const grid = content.querySelector('.capability-grid');
@@ -2212,58 +2249,71 @@ function populateTransactionRights(transactionRights) {
         </div>
       `;
     } else if (typeof details === 'object' && details !== null) {
-      // Enhanced display for detailed transaction rights objects
-      const enabled = details.enabled || false;
-      const viewLevel = details.view !== undefined ? details.view : 'N/A';
-      const canDraft = details.draft || false;
-      const canAuthorize = details.authorize || false;
-      const canCancel = details.cancel || false;
-      const dualAuthLimit = details.dualAuthLimit !== undefined ? 
-        (details.dualAuthLimit === -1 ? 'No Limit' : 
-         details.dualAuthLimit === 0 ? 'Not Allowed' : 
-         `$${details.dualAuthLimit.toLocaleString()}`) : 'N/A';
-      
-      // Interpret view level
-      const getViewDescription = (level) => {
-        switch(level) {
-          case 0: return 'No View';
-          case 1: return 'View Own';
-          case 2: return 'View All';
-          default: return level;
+      // Create inline badges for each permission with green/red styling like feature flags
+      const createPermissionBadge = (label, value) => {
+        if (typeof value === 'boolean') {
+          return `<span class="permission-badge ${value ? 'enabled' : 'disabled'}">${label}: ${value ? 'Yes' : 'No'}</span>`;
+        } else if (typeof value === 'number') {
+          if (label === 'View') {
+            const viewText = value === 0 ? 'None' : value === 1 ? 'Own' : value === 2 ? 'All' : value;
+            const isEnabled = value > 0;
+            return `<span class="permission-badge ${isEnabled ? 'enabled' : 'disabled'}">${label}: ${viewText}</span>`;
+          } else if (label === 'Dual Auth Limit') {
+            if (value === -1) {
+              return `<span class="permission-badge enabled">${label}: No Limit</span>`;
+            } else if (value === 0) {
+              return `<span class="permission-badge disabled">${label}: Not Allowed</span>`;
+            } else {
+              return `<span class="permission-badge enabled">${label}: $${value.toLocaleString()}</span>`;
+            }
+          }
         }
+        return `<span class="permission-badge neutral">${label}: ${value}</span>`;
       };
       
-      // Create permission badges
-      const permissions = [];
-      if (viewLevel !== 'N/A' && viewLevel > 0) {
-        permissions.push(`View (${getViewDescription(viewLevel)})`);
-      }
-      if (canDraft) permissions.push('Draft');
-      if (canAuthorize) permissions.push('Authorize');
-      if (canCancel) permissions.push('Cancel');
+      // Create all permission badges in one line
+      const permissionBadges = [];
       
-      const permissionBadges = permissions.length > 0 ? 
-        permissions.map(p => `<span class="permission-badge">${p}</span>`).join(' ') : 
-        '<span class="permission-badge disabled">No Permissions</span>';
+      // Add view permission
+      if (details.view !== undefined) {
+        permissionBadges.push(createPermissionBadge('View', details.view));
+      }
+      
+      // Add enabled status
+      if (details.enabled !== undefined) {
+        permissionBadges.push(createPermissionBadge('Enabled', details.enabled));
+      }
+      
+      // Add draft permission
+      if (details.draft !== undefined) {
+        permissionBadges.push(createPermissionBadge('Draft', details.draft));
+      }
+      
+      // Add authorize permission
+      if (details.authorize !== undefined) {
+        permissionBadges.push(createPermissionBadge('Authorize', details.authorize));
+      }
+      
+      // Add cancel permission
+      if (details.cancel !== undefined) {
+        permissionBadges.push(createPermissionBadge('Cancel', details.cancel));
+      }
+      
+      // Add draft restricted status
+      if (details.draftRestricted !== undefined) {
+        permissionBadges.push(createPermissionBadge('Draft Restricted', details.draftRestricted));
+      }
+      
+      // Add dual auth limit
+      if (details.dualAuthLimit !== undefined) {
+        permissionBadges.push(createPermissionBadge('Dual Auth Limit', details.dualAuthLimit));
+      }
       
       return `
-        <div class="capability-item transaction-right-detailed">
-          <div class="capability-header">
-            <div class="capability-name">${displayName}</div>
-            <div class="capability-status ${enabled ? 'enabled' : 'disabled'}">
-              ${enabled ? 'ENABLED' : 'DISABLED'}
-            </div>
-          </div>
-          <div class="transaction-details">
-            <div class="permission-row">
-              <strong>Permissions:</strong> ${permissionBadges}
-            </div>
-            ${dualAuthLimit !== 'N/A' ? `
-              <div class="auth-limit-row">
-                <strong>Dual Auth Limit:</strong> <span class="auth-limit">${dualAuthLimit}</span>
-              </div>
-            ` : ''}
-            ${details.draftRestricted ? '<div class="restriction">? Draft Restricted</div>' : ''}
+        <div class="capability-item transaction-right-inline">
+          <div class="transaction-name">${displayName}</div>
+          <div class="transaction-permissions">
+            ${permissionBadges.join(' ')}
           </div>
         </div>
       `;
@@ -2370,7 +2420,7 @@ function clearUserDetailsContent() {
   const profileGrid = document.querySelector('.user-profile-content .user-info-grid');
   const sessionGrid = document.querySelector('.user-session-content .user-info-grid');
   const featuresGrid = document.querySelector('#features-content .capability-grid');
-  const transactionRightsGrid = document.querySelector('#transaction-rights-content .capability-grid');
+  const transactionRightsGrid = document.querySelector('#transactions-content .capability-grid');
   const systemFlagsGrid = document.querySelector('#system-content .capability-grid');
   
   if (profileGrid) {
@@ -2394,3 +2444,3953 @@ function clearUserDetailsContent() {
   }
 }
 
+// ========== AI INSIGHTS FUNCTIONALITY ==========
+
+let aiAnalysisData = null;
+
+function initializeAIInsights() {
+  console.log('[popup.js] Initializing AI Insights tab');
+  
+  // Check for cached authentication token first
+  initializeAuthToken().then(token => {
+    const authForm = document.getElementById('auth-form');
+    const authStatus = document.getElementById('auth-status');
+    
+    if (token) {
+      console.log('[AUTH] Found cached token, hiding login form');
+      // Hide login form and show authenticated status
+      if (authForm) authForm.style.display = 'none';
+      if (authStatus) {
+        authStatus.style.display = 'block';
+        authStatus.innerHTML = `
+          <div style="padding: 15px; background: #d4edda; border: 1px solid #c3e6cb; border-radius: 4px;">
+            <div style="font-weight: 600; margin-bottom: 10px; color: #155724;">
+              ✅ Authenticated with Cached Token
+            </div>
+            <div style="margin-bottom: 10px; font-size: 12px; color: #155724;">
+              Using cached authentication token. Ready for Alexandria API queries.
+            </div>
+            <div style="margin-top: 15px; display: flex; gap: 10px;">
+              <button onclick="resetAuth()" style="padding: 6px 12px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 11px;">
+                🔄 Login as Different User
+              </button>
+            </div>
+          </div>
+        `;
+      }
+    } else {
+      console.log('[AUTH] No cached token found, showing login form');
+      // Show login form
+      if (authForm) authForm.style.display = 'block';
+      if (authStatus) authStatus.style.display = 'none';
+    }
+  }).catch(error => {
+    console.warn('[AUTH] Error checking cached token:', error);
+    // Show login form as fallback
+    const authForm = document.getElementById('auth-form');
+    const authStatus = document.getElementById('auth-status');
+    if (authForm) authForm.style.display = 'block';
+    if (authStatus) authStatus.style.display = 'none';
+  });
+  
+  // Initialize AI action buttons
+  const generateSummaryBtn = document.getElementById('generate-summary');
+  const analyzePerformanceBtn = document.getElementById('analyze-performance');
+  const detectIssuesBtn = document.getElementById('detect-issues');
+  const summarizeLogsBtn = document.getElementById('summarize-logs');
+  const clearAnalysisBtn = document.getElementById('clear-analysis');
+  const authLoginBtn = document.getElementById('auth-login');
+  
+  if (generateSummaryBtn) {
+    generateSummaryBtn.addEventListener('click', generateAISummary);
+  }
+  
+  if (analyzePerformanceBtn) {
+    analyzePerformanceBtn.addEventListener('click', analyzePerformance);
+  }
+  
+  if (detectIssuesBtn) {
+    detectIssuesBtn.addEventListener('click', detectIssues);
+  }
+  
+  if (summarizeLogsBtn) {
+    summarizeLogsBtn.addEventListener('click', summarizeLogs);
+  }
+  
+  if (clearAnalysisBtn) {
+    clearAnalysisBtn.addEventListener('click', clearAIAnalysis);
+  }
+  
+  if (authLoginBtn) {
+    authLoginBtn.addEventListener('click', handleLogin);
+  }
+  
+  // Initialize time query functionality
+  const parseTimeQueryBtn = document.getElementById('parse-time-query');
+  const timeQueryInput = document.getElementById('time-query-input');
+  
+  if (parseTimeQueryBtn && timeQueryInput) {
+    parseTimeQueryBtn.addEventListener('click', () => {
+      const query = timeQueryInput.value.trim();
+      if (query) {
+        parseTimeQuery(query);
+      } else {
+        alert('Please enter a time query first.');
+      }
+    });
+  }
+  
+  // Initialize environment-specific log summary buttons
+  const summarizeHQBtn = document.getElementById('summarize-hq-logs');
+  const summarizeKaminoBtn = document.getElementById('summarize-kamino-logs');
+  const summarizeLightBridgeBtn = document.getElementById('summarize-lightbridge-logs');
+  const summarizeArdentBtn = document.getElementById('summarize-ardent-logs');
+  
+  if (summarizeHQBtn) {
+    summarizeHQBtn.addEventListener('click', () => summarizeEnvironmentLogs('HQ'));
+  }
+  
+  if (summarizeKaminoBtn) {
+    summarizeKaminoBtn.addEventListener('click', () => summarizeEnvironmentLogs('Kamino'));
+  }
+  
+  if (summarizeLightBridgeBtn) {
+    summarizeLightBridgeBtn.addEventListener('click', () => summarizeEnvironmentLogs('LightBridge'));
+  }
+  
+  if (summarizeArdentBtn) {
+    summarizeArdentBtn.addEventListener('click', () => summarizeEnvironmentLogs('Ardent'));
+  }
+  
+  // Load existing analysis if available
+  if (aiAnalysisData) {
+    displayAIAnalysis(aiAnalysisData);
+  }
+}
+
+// Function to parse time-based queries and convert to time format
+function parseTimeQuery(query) {
+  console.log('[TIME_PARSE] Parsing query:', query);
+  
+  const parsedTimeDisplay = document.getElementById('parsed-time-display');
+  const parsedTimeValue = document.getElementById('parsed-time-value');
+  
+  // Convert query to lowercase for easier parsing
+  const lowerQuery = query.toLowerCase();
+  
+  let timeValue = '';
+  let timeUnit = '';
+  let parsedTime = '';
+  
+  // Regular expressions for different time patterns
+  const patterns = [
+    // "last X minutes/mins" or "past X minutes"
+    { regex: /(?:last|past)\s+(\d+)\s+(?:minutes?|mins?)/, unit: 'm' },
+    // "last X hours" or "past X hours"  
+    { regex: /(?:last|past)\s+(\d+)\s+(?:hours?|hrs?)/, unit: 'h' },
+    // "last X days" or "past X days"
+    { regex: /(?:last|past)\s+(\d+)\s+(?:days?)/, unit: 'd' },
+    // "X minutes ago"
+    { regex: /(\d+)\s+(?:minutes?|mins?)\s+ago/, unit: 'm' },
+    // "X hours ago"
+    { regex: /(\d+)\s+(?:hours?|hrs?)\s+ago/, unit: 'h' },
+    // "X days ago"
+    { regex: /(\d+)\s+(?:days?)\s+ago/, unit: 'd' },
+    // Direct format like "10m", "2h", "1d"
+    { regex: /(\d+)([mhd])(?:\s|$)/, unit: null }
+  ];
+  
+  let matched = false;
+  
+  for (const pattern of patterns) {
+    const match = lowerQuery.match(pattern.regex);
+    if (match) {
+      timeValue = match[1];
+      timeUnit = pattern.unit || match[2]; // Use captured unit if no predefined unit
+      parsedTime = `-${timeValue}${timeUnit}`;
+      matched = true;
+      break;
+    }
+  }
+  
+  if (!matched) {
+    // Try to find any numbers and guess the unit
+    const numberMatch = lowerQuery.match(/(\d+)/);
+    if (numberMatch) {
+      timeValue = numberMatch[1];
+      if (lowerQuery.includes('hour') || lowerQuery.includes('hr')) {
+        timeUnit = 'h';
+      } else if (lowerQuery.includes('day')) {
+        timeUnit = 'd';
+      } else {
+        // Default to minutes
+        timeUnit = 'm';
+      }
+      parsedTime = `-${timeValue}${timeUnit}`;
+      matched = true;
+    }
+  }
+  
+  if (matched) {
+    // Store the parsed time globally for use in queries
+    window.currentTimeFilter = parsedTime;
+    
+    // Update the display
+    parsedTimeValue.textContent = parsedTime;
+    parsedTimeDisplay.style.display = 'block';
+    
+    console.log('[TIME_PARSE] Successfully parsed:', parsedTime);
+    
+    // Update the global time variables used in queries
+    updateGlobalTimeFilter(parsedTime);
+  } else {
+    alert('Could not parse time from query. Try formats like:\n- "last 10 minutes"\n- "past 2 hours"\n- "30 mins ago"\n- "1d" (direct format)');
+    parsedTimeDisplay.style.display = 'none';
+  }
+}
+
+// Function to update global time filters used in Alexandria queries
+function updateGlobalTimeFilter(timeFilter) {
+  // Update any global time variables here if they exist
+  console.log('[TIME_FILTER] Updated global time filter to:', timeFilter);
+  
+  // This will be used by the environment-specific log summary functions
+  window.customTimeFilter = timeFilter;
+}
+
+// Function to summarize logs for specific environments
+window.summarizeEnvironmentLogs = async function(environment) {
+  console.log(`[ENV_SUMMARY] Starting ${environment} log summary`);
+  
+  if (!authToken) {
+    await initializeAuthToken();
+    if (!authToken) {
+      alert('Please authenticate first before summarizing logs.');
+      return;
+    }
+  }
+
+  // Check if we have stored search strings from session summary
+  if (!window.environmentSearchStrings) {
+    alert('No session data available. Please ensure you have captured some network requests first.');
+    return;
+  }
+
+  const timeFilter = window.customTimeFilter || '-8h'; // Default to 8 hours if no custom time set
+  const envData = window.environmentSearchStrings;
+  
+  // Map environment names to search string keys
+  const environmentKeyMap = {
+    'HQ': 'hq',
+    'Kamino': 'kamino',
+    'LightBridge': 'lightbridge',
+    'Ardent': 'ardent'
+  };
+  
+  const envKey = environmentKeyMap[environment];
+  if (!envKey || !envData.searchStrings[envKey]) {
+    alert(`No search configuration found for ${environment} environment.`);
+    return;
+  }
+
+  try {
+    // Show loading state
+    const logSummariesContent = document.getElementById('log-summaries-content');
+    logSummariesContent.innerHTML = `
+      <div style="padding: 20px; text-align: center;">
+        <div style="font-size: 16px; margin-bottom: 10px;">🔄 Summarizing ${environment} Logs...</div>
+        <div style="font-size: 14px; color: #666;">Time Range: ${timeFilter}</div>
+        <div style="margin-top: 15px;">
+          <div class="loading-spinner"></div>
+        </div>
+      </div>
+    `;
+    
+    // Get the base search string and modify it with custom time if needed
+    let searchString = envData.searchStrings[envKey];
+    
+    // If a custom time filter is set, update the search string
+    if (window.customTimeFilter && window.customTimeFilter !== '-8h') {
+      // For HQ and Kamino (session-based), update the earliest/latest times
+      if (envKey === 'hq' || envKey === 'kamino') {
+        // Calculate new time range based on custom filter
+        const now = new Date();
+        const customStart = calculateTimeFromFilter(window.customTimeFilter);
+        const formattedCustomStart = formatDateTime(customStart);
+        const formattedCustomEnd = formatDateTime(now);
+        
+        searchString = `search index="${envData.indices[envKey]}" sessionId="${envData.sessionId}" earliest="${formattedCustomStart}" latest="${formattedCustomEnd}" | fields * | extract | sort timestamp, seqId | head 10000`;
+      } 
+      // For LightBridge and Ardent (workstation-based), update the earliest time
+      else if (envKey === 'lightbridge') {
+        const customStart = calculateTimeFromFilter(window.customTimeFilter);
+        const formattedCustomStart = formatDateTime(customStart);
+        const formattedCustomEnd = formatDateTime(new Date());
+        
+        searchString = `search index="${envData.indices[envKey]}" workstationId="${envData.workstationId}" earliest="${formattedCustomStart}" latest="${formattedCustomEnd}" | fields * | extract | sort timestamp, seqId | head 10000`;
+      }
+      else if (envKey === 'ardent') {
+        searchString = `search index="${envData.indices[envKey]}" workstationId="${envData.workstationId}" earliest="${window.customTimeFilter}" | fields * | extract | sort timestamp, seqId | head 10000`;
+      }
+    }
+    
+    console.log(`[ENV_SUMMARY] Using search string for ${environment}:`, searchString);
+    
+    // Create query configuration for this environment
+    const environmentQuery = {
+      description: `${environment} Environment Logs`,
+      query: searchString,
+      timeRange: timeFilter,
+      environment: environment
+    };
+    
+    // Execute the Alexandria log query with this specific search string
+    await executeAlexandriaLogQuery(searchString, environment);
+    
+  } catch (error) {
+    console.error(`[ENV_SUMMARY] Error summarizing ${environment} logs:`, error);
+    
+    const logSummariesContent = document.getElementById('log-summaries-content');
+    logSummariesContent.innerHTML = `
+      <div style="padding: 20px; text-align: center; color: #dc3545;">
+        <div style="font-size: 16px; margin-bottom: 10px;">❌ Error Summarizing ${environment} Logs</div>
+        <div style="font-size: 14px;">${error.message}</div>
+      </div>
+    `;
+  }
+};
+
+// Helper function to calculate time from filter string (e.g., "-10m" -> Date 10 minutes ago)
+function calculateTimeFromFilter(timeFilter) {
+  const now = new Date();
+  const match = timeFilter.match(/^-(\d+)([mhd])$/);
+  
+  if (!match) return now;
+  
+  const value = parseInt(match[1]);
+  const unit = match[2];
+  
+  switch (unit) {
+    case 'm': // minutes
+      return new Date(now.getTime() - (value * 60 * 1000));
+    case 'h': // hours
+      return new Date(now.getTime() - (value * 60 * 60 * 1000));
+    case 'd': // days
+      return new Date(now.getTime() - (value * 24 * 60 * 60 * 1000));
+    default:
+      return now;
+  }
+}
+
+// Function to display the exact prompt being sent to Alexandria
+function displayExactPrompt(prompt, queryInfo) {
+  console.log('[PROMPT_DISPLAY] Showing exact prompt to user');
+  
+  const logSummariesContent = document.getElementById('log-summaries-content');
+  if (!logSummariesContent) return;
+  
+  const promptPreview = prompt.length > 2000 ? prompt.substring(0, 2000) + '\n\n[... truncated for display, full prompt sent to Alexandria ...]' : prompt;
+  
+  logSummariesContent.innerHTML = `
+    <div style="padding: 20px; max-width: 100%;">
+      <div style="font-weight: 600; margin-bottom: 15px; font-size: 16px; color: #007acc;">
+        📤 Alexandria AI Analysis Request
+      </div>
+      
+      <div style="margin-bottom: 20px; padding: 15px; background: #e3f2fd; border: 1px solid #2196f3; border-radius: 6px;">
+        <div style="font-weight: 600; margin-bottom: 10px;">📋 Request Details:</div>
+        <div style="margin-bottom: 8px;">
+          <strong>Query Type:</strong> ${queryInfo?.description || 'General Log Analysis'}
+        </div>
+        <div style="margin-bottom: 8px;">
+          <strong>Environment:</strong> ${queryInfo?.type || 'Mixed'}
+        </div>
+        <div style="margin-bottom: 8px;">
+          <strong>Prompt Length:</strong> ${prompt.length.toLocaleString()} characters
+        </div>
+        <div style="margin-bottom: 8px;">
+          <strong>API Endpoint:</strong> alexandria.shs.aws.q2e.io/api/v3/ai/summarize
+        </div>
+        <div style="margin-bottom: 8px;">
+          <strong>Authentication:</strong> Bearer token (8-hour cache)
+        </div>
+      </div>
+      
+      <div style="margin-bottom: 20px;">
+        <div style="font-weight: 600; margin-bottom: 10px; color: #2e7d32;">📄 Exact Prompt Being Sent to Alexandria AI:</div>
+        <div style="background: #f5f5f5; border: 1px solid #ddd; border-radius: 6px; padding: 15px; font-family: 'Courier New', monospace; font-size: 12px; line-height: 1.4; white-space: pre-wrap; max-height: 400px; overflow-y: auto; word-wrap: break-word;">
+${promptPreview}
+        </div>
+      </div>
+      
+      <div style="margin-bottom: 20px; padding: 15px; background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 6px;">
+        <div style="font-weight: 600; margin-bottom: 10px;">ℹ️ How This Works:</div>
+        <ol style="margin: 5px 0; padding-left: 20px;">
+          <li>Extension queries Alexandria logs using your session data</li>
+          <li>Intelligent log selection picks key logs (first 5 + last 5 + errors + context)</li>
+          <li>Selected logs are formatted into a structured prompt</li>
+          <li>Prompt is sent to Alexandria AI for analysis via POST request</li>
+          <li>AI analyzes the logs and returns insights about errors, performance, etc.</li>
+        </ol>
+      </div>
+      
+      <div style="margin-bottom: 20px;">
+        <div class="ai-loading">
+          <div class="loading-spinner"></div>
+          🤖 Sending request to Alexandria AI... Please wait for analysis results.
+        </div>
+      </div>
+      
+      <div style="text-align: center;">
+        <button onclick="copyPromptToClipboard()" style="padding: 8px 16px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px;">
+          📋 Copy Full Prompt
+        </button>
+        <button onclick="showRawPromptData()" style="padding: 8px 16px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">
+          🔍 Show Raw Data
+        </button>
+      </div>
+    </div>
+  `;
+  
+  // Store the prompt globally so the copy function can access it
+  window.currentAlexandriaPrompt = prompt;
+}
+
+// Function to copy the full prompt to clipboard
+function copyPromptToClipboard() {
+  if (window.currentAlexandriaPrompt) {
+    navigator.clipboard.writeText(window.currentAlexandriaPrompt).then(() => {
+      alert('✅ Full Alexandria prompt copied to clipboard!');
+    }).catch(() => {
+      // Fallback for older browsers
+      const textArea = document.createElement('textarea');
+      textArea.value = window.currentAlexandriaPrompt;
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textArea);
+      alert('✅ Full Alexandria prompt copied to clipboard!');
+    });
+  }
+}
+
+// Function to show raw prompt data in a modal-like view
+function showRawPromptData() {
+  if (window.currentAlexandriaPrompt) {
+    const popup = window.open('', '_blank', 'width=800,height=600,scrollbars=yes,resizable=yes');
+    popup.document.write(`
+      <html>
+        <head>
+          <title>Alexandria Prompt - Raw Data</title>
+          <style>
+            body { font-family: monospace; padding: 20px; line-height: 1.4; }
+            .header { background: #f0f0f0; padding: 10px; margin-bottom: 20px; border-radius: 4px; }
+            .content { white-space: pre-wrap; word-wrap: break-word; }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h2>🤖 Alexandria AI Prompt - Raw Data</h2>
+            <p><strong>Length:</strong> ${window.currentAlexandriaPrompt.length.toLocaleString()} characters</p>
+            <p><strong>Generated:</strong> ${new Date().toLocaleString()}</p>
+          </div>
+          <div class="content">${window.currentAlexandriaPrompt.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+        </body>
+      </html>
+    `);
+  }
+}
+
+// Helper function to intelligently select logs for AI analysis
+function selectLogsForAnalysis(logs) {
+  if (!logs || logs.length === 0) {
+    return [];
+  }
+  
+  console.log(`[LOG_SELECTION] Processing ${logs.length} logs for intelligent selection`);
+  
+  let selectedLogs = [];
+  
+  // Step 1: Get first 5 logs
+  const firstLogs = logs.slice(0, 5);
+  selectedLogs = selectedLogs.concat(firstLogs.map(log => ({ ...log, source: 'first' })));
+  console.log(`[LOG_SELECTION] Added ${firstLogs.length} first logs`);
+  
+  // Step 2: Get last 5 logs (avoid duplicates if total logs <= 5)
+  if (logs.length > 5) {
+    const lastLogs = logs.slice(-5);
+    selectedLogs = selectedLogs.concat(lastLogs.map(log => ({ ...log, source: 'last' })));
+    console.log(`[LOG_SELECTION] Added ${lastLogs.length} last logs`);
+  }
+  
+  // Step 3: Find error level logs
+  const errorLogs = logs.filter(log => {
+    const message = log.message || log._raw || JSON.stringify(log);
+    const level = log.level || log.logLevel || '';
+    
+    // Check for error indicators
+    const hasErrorLevel = level.toLowerCase().includes('error') || 
+                         level.toLowerCase().includes('exception') ||
+                         level.toLowerCase().includes('fatal');
+    
+    const hasErrorMessage = message.toLowerCase().includes('error') ||
+                          message.toLowerCase().includes('exception') ||
+                          message.toLowerCase().includes('failed') ||
+                          message.toLowerCase().includes('failure') ||
+                          message.toLowerCase().includes('fatal') ||
+                          message.toLowerCase().includes('critical');
+    
+    return hasErrorLevel || hasErrorMessage;
+  });
+  
+  console.log(`[LOG_SELECTION] Found ${errorLogs.length} error logs`);
+  
+  // Step 4: For each error log, try to find the preceding request/response context
+  for (const errorLog of errorLogs) {
+    const errorIndex = logs.findIndex(log => log === errorLog);
+    
+    // Add the error log
+    selectedLogs.push({ ...errorLog, source: 'error' });
+    
+    // Look for context logs before the error (up to 5 logs back)
+    const contextStart = Math.max(0, errorIndex - 5);
+    const contextLogs = logs.slice(contextStart, errorIndex);
+    
+    for (const contextLog of contextLogs) {
+      const contextMessage = contextLog.message || contextLog._raw || JSON.stringify(contextLog);
+      
+      // Check if this looks like a request or response
+      if (contextMessage.toLowerCase().includes('request') ||
+          contextMessage.toLowerCase().includes('response') ||
+          contextMessage.toLowerCase().includes('http') ||
+          contextMessage.toLowerCase().includes('api') ||
+          contextMessage.toLowerCase().includes('endpoint')) {
+        selectedLogs.push({ ...contextLog, source: 'context' });
+      }
+    }
+  }
+  
+  // Step 5: Remove duplicates based on timestamp and message
+  const uniqueLogs = [];
+  const seen = new Set();
+  
+  for (const log of selectedLogs) {
+    const key = `${log.timestamp || ''}_${(log.message || log._raw || '').substring(0, 100)}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      uniqueLogs.push(log);
+    }
+  }
+  
+  console.log(`[LOG_SELECTION] Selected ${uniqueLogs.length} unique logs (${errorLogs.length} errors, ${uniqueLogs.filter(l => l.source === 'context').length} context)`);
+  
+  return uniqueLogs.slice(0, 25); // Limit to 25 logs max to avoid prompt size issues
+}
+
+// Function to execute Alexandria log query with specific search string
+async function executeAlexandriaLogQuery(searchString, environment) {
+  console.log(`[ALEXANDRIA_QUERY] Executing query for ${environment}:`, searchString);
+  
+  try {
+    // Use the existing proceedWithAlexandriaLogQuery function but with our custom search
+    const customQuery = {
+      description: `${environment} Environment Query`,
+      query: searchString
+    };
+    
+    // Call the existing Alexandria query function with our custom search string
+    const result = await queryAlexandriaLogs(authToken, searchString);
+    
+    if (result && result.Data && result.Data.length > 0) {
+      console.log(`[ALEXANDRIA_QUERY] Got ${result.Data.length} log entries for ${environment}`);
+      
+      // Prepare log data for AI analysis using intelligent selection
+      const selectedLogs = selectLogsForAnalysis(result.Data);
+      let logSummary = `Found ${result.Data.length} log entries from ${environment} environment. Selected ${selectedLogs.length} key logs for analysis:\n\n`;
+      
+      // Group logs by source for better organization
+      const logsBySource = {
+        first: selectedLogs.filter(log => log.source === 'first'),
+        last: selectedLogs.filter(log => log.source === 'last'),
+        error: selectedLogs.filter(log => log.source === 'error'),
+        context: selectedLogs.filter(log => log.source === 'context')
+      };
+      
+      // Add first logs
+      if (logsBySource.first.length > 0) {
+        logSummary += `=== FIRST ${logsBySource.first.length} LOGS (Session Start) ===\n`;
+        logsBySource.first.forEach((log, index) => {
+          logSummary += `Log ${index + 1}:\n`;
+          logSummary += `Timestamp: ${log.timestamp || 'N/A'}\n`;
+          logSummary += `Level: ${log.level || log.logLevel || 'N/A'}\n`;
+          logSummary += `Message: ${log.message || log._raw || JSON.stringify(log).substring(0, 300)}\n`;
+          logSummary += `---\n`;
+        });
+        logSummary += `\n`;
+      }
+      
+      // Add error logs with context
+      if (logsBySource.error.length > 0) {
+        logSummary += `=== ERROR LOGS (${logsBySource.error.length} found) ===\n`;
+        logsBySource.error.forEach((log, index) => {
+          logSummary += `Error ${index + 1}:\n`;
+          logSummary += `Timestamp: ${log.timestamp || 'N/A'}\n`;
+          logSummary += `Level: ${log.level || log.logLevel || 'ERROR'}\n`;
+          logSummary += `Message: ${log.message || log._raw || JSON.stringify(log).substring(0, 300)}\n`;
+          logSummary += `---\n`;
+        });
+        logSummary += `\n`;
+      }
+      
+      // Add context logs
+      if (logsBySource.context.length > 0) {
+        logSummary += `=== CONTEXT LOGS (${logsBySource.context.length} request/response logs around errors) ===\n`;
+        logsBySource.context.forEach((log, index) => {
+          logSummary += `Context ${index + 1}:\n`;
+          logSummary += `Timestamp: ${log.timestamp || 'N/A'}\n`;
+          logSummary += `Level: ${log.level || log.logLevel || 'N/A'}\n`;
+          logSummary += `Message: ${log.message || log._raw || JSON.stringify(log).substring(0, 300)}\n`;
+          logSummary += `---\n`;
+        });
+        logSummary += `\n`;
+      }
+      
+      // Add last logs
+      if (logsBySource.last.length > 0) {
+        logSummary += `=== LAST ${logsBySource.last.length} LOGS (Recent Activity) ===\n`;
+        logsBySource.last.forEach((log, index) => {
+          logSummary += `Recent ${index + 1}:\n`;
+          logSummary += `Timestamp: ${log.timestamp || 'N/A'}\n`;
+          logSummary += `Level: ${log.level || log.logLevel || 'N/A'}\n`;
+          logSummary += `Message: ${log.message || log._raw || JSON.stringify(log).substring(0, 300)}\n`;
+          logSummary += `---\n`;
+        });
+      }
+      
+      if (result.Data.length > selectedLogs.length) {
+        logSummary += `\n... and ${result.Data.length - selectedLogs.length} more log entries not shown`;
+      }
+      
+      // Update UI to show analysis in progress
+      const logSummariesContent = document.getElementById('log-summaries-content');
+      logSummariesContent.innerHTML = `
+        <div class="ai-loading">
+          <div class="loading-spinner"></div>
+          📊 Processing ${result.Data.length} ${environment} log entries with Alexandria AI analysis...
+        </div>
+      `;
+      
+      // Send to Alexandria for AI analysis
+      const summaryPrompt = `Analyze these ${environment} environment log entries and provide insights:
+
+${logSummary}
+
+Focus on:
+1. Any errors or issues found
+2. Performance patterns
+3. Key events or transactions
+4. Recommendations for optimization
+5. Environment-specific insights`;
+
+      console.log(`[ALEXANDRIA_QUERY] Sending AI analysis prompt for ${environment}:`, summaryPrompt);
+      
+      // NEW: Show the exact prompt being sent to Alexandria in the UI
+      displayExactPrompt(summaryPrompt, { description: `${environment} Environment Query`, type: environment.toLowerCase() });
+      
+      try {
+        const alexandriaAnalysis = await summarizeLogsAPI(summaryPrompt);
+        console.log(`[ALEXANDRIA_QUERY] AI analysis complete for ${environment}:`, alexandriaAnalysis);
+        
+        // Display results with both log data and AI analysis
+        displayLogSummaryResults(result, alexandriaAnalysis, customQuery);
+      } catch (analysisError) {
+        console.error(`[ALEXANDRIA_QUERY] AI analysis failed for ${environment}:`, analysisError);
+        
+        // Show logs without analysis if AI fails
+        displayLogSummaryResults(result, {
+          summary: `Analysis failed for ${environment} logs: ${analysisError.message}`,
+          response: `Error: ${analysisError.message}`
+        }, customQuery);
+      }
+    } else {
+      const logSummariesContent = document.getElementById('log-summaries-content');
+      logSummariesContent.innerHTML = `
+        <div style="padding: 20px; text-align: center;">
+          <div style="font-size: 16px; margin-bottom: 10px;">📊 ${environment} Log Query Complete</div>
+          <div style="font-size: 14px; color: #666;">No log entries found for the specified time range.</div>
+          <div style="margin-top: 15px; padding: 10px; background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 4px;">
+            <strong>Search Query:</strong><br>
+            <code style="font-size: 12px; word-break: break-all;">${searchString}</code>
+          </div>
+        </div>
+      `;
+    }
+  } catch (error) {
+    console.error(`[ALEXANDRIA_QUERY] Error executing query for ${environment}:`, error);
+    throw error;
+  }
+}
+
+async function handleLogin() {
+  const usernameInput = document.getElementById('auth-username');
+  const passwordInput = document.getElementById('auth-password');
+  const authForm = document.getElementById('auth-form');
+  const authStatus = document.getElementById('auth-status');
+  const loginBtn = document.getElementById('auth-login');
+  
+  const username = usernameInput?.value?.trim();
+  const password = passwordInput?.value?.trim();
+  
+  if (!username || !password) {
+    alert('Please enter both username and password');
+    return;
+  }
+  
+  // Show loading state
+  loginBtn.textContent = '🔄 Logging in...';
+  loginBtn.disabled = true;
+  
+  // Add timeout to prevent infinite loading
+  const timeoutId = setTimeout(() => {
+    loginBtn.textContent = '⏰ Request timed out - Retry';
+    loginBtn.disabled = false;
+  }, 15000); // 15 second timeout
+  
+  try {
+    console.log('[AUTH] Attempting login for user:', username);
+    
+    const response = await fetchAuthToken(username, password);
+    clearTimeout(timeoutId);
+    
+    // Success - show the full response on screen for now
+    authForm.style.display = 'none';
+    authStatus.style.display = 'block';
+    authStatus.innerHTML = `
+      <div style="padding: 15px; background: #d4edda; border: 1px solid #c3e6cb; border-radius: 4px;">
+        <div style="font-weight: 600; margin-bottom: 10px; color: #155724;">
+          ✅ Login Successful!
+        </div>
+        <div style="margin-bottom: 15px;">
+          <strong>Full API Response:</strong>
+        </div>
+        <div style="background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 4px; padding: 12px; font-family: monospace; font-size: 11px; white-space: pre-wrap; max-height: 200px; overflow-y: auto; line-height: 1.4;">
+${JSON.stringify(response, null, 2)}
+        </div>
+        <div style="margin-top: 15px; display: flex; gap: 10px;">
+          <button onclick="resetAuth()" style="padding: 6px 12px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 11px;">
+            🔄 Login as Different User
+          </button>
+          <button onclick="copyTokenResponse()" style="padding: 6px 12px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 11px;">
+            📋 Copy Response
+          </button>
+        </div>
+      </div>
+    `;
+    
+    // Store the response globally so we can access it later
+    window.lastTokenResponse = response;
+    
+    // Extract and store the authentication token
+    if (response && response.access_token) {
+      authToken = response.access_token;
+      console.log('[AUTH] Token extracted from access_token:', authToken ? `${String(authToken).substring(0, 8)}...` : 'none');
+      await saveTokenToCache(authToken); // Save to persistent cache
+    } else if (response && typeof response === 'string') {
+      // If response is a string token
+      authToken = response;
+      console.log('[AUTH] String token stored:', authToken ? `${authToken.substring(0, 8)}...` : 'none');
+      await saveTokenToCache(authToken); // Save to persistent cache
+    } else if (response && response.token) {
+      // Try alternate token field
+      authToken = response.token;
+      console.log('[AUTH] Token extracted from token field:', authToken ? `${String(authToken).substring(0, 8)}...` : 'none');
+      await saveTokenToCache(authToken); // Save to persistent cache
+    } else {
+      console.warn('[AUTH] Could not extract token from response, checking response structure:');
+      console.warn('[AUTH] Response type:', typeof response);
+      console.warn('[AUTH] Response keys:', response ? Object.keys(response) : 'null');
+      console.warn('[AUTH] Full response:', response);
+      
+      // Try to find any field that looks like a token
+      if (response && typeof response === 'object') {
+        const possibleTokenFields = ['access_token', 'token', 'authToken', 'auth_token', 'bearer_token', 'jwt'];
+        let foundToken = null;
+        
+        for (const field of possibleTokenFields) {
+          if (response[field] && typeof response[field] === 'string') {
+            foundToken = response[field];
+            console.log('[AUTH] Found token in field:', field);
+            break;
+          }
+        }
+        
+        if (foundToken) {
+          authToken = foundToken;
+          console.log('[AUTH] Using found token:', foundToken ? `${foundToken.substring(0, 8)}...` : 'none');
+          await saveTokenToCache(authToken); // Save to persistent cache
+        } else {
+          // Last resort: convert entire response to string if it looks like a UUID/token
+          const responseStr = String(response);
+          if (responseStr.length > 10 && responseStr.match(/^[a-f0-9-]+$/i)) {
+            authToken = responseStr;
+            console.log('[AUTH] Using stringified response as token:', responseStr.substring(0, 8) + '...');
+            await saveTokenToCache(authToken); // Save to persistent cache
+          } else {
+            console.error('[AUTH] No valid token found in response');
+            authToken = null;
+          }
+        }
+      } else {
+        authToken = null;
+      }
+    }
+    
+    console.log('[AUTH] Login successful, response stored');
+    
+  } catch (error) {
+    clearTimeout(timeoutId);
+    console.error('[AUTH] Login failed:', error);
+    
+    // Show error and reset button
+    loginBtn.textContent = '❌ Login Failed - Retry';
+    loginBtn.disabled = false;
+    
+    // Show detailed error message
+    const errorDiv = document.createElement('div');
+    errorDiv.style.cssText = 'margin-top: 15px; padding: 12px; background: #f8d7da; border: 1px solid #f5c6cb; color: #721c24; border-radius: 4px; font-size: 12px;';
+    errorDiv.innerHTML = `
+      <div style="font-weight: 600; margin-bottom: 8px;">❌ Login Failed</div>
+      <div style="margin-bottom: 10px;">
+        <strong>Error:</strong> ${error.message}
+      </div>
+      <div style="margin-bottom: 10px;">
+        <strong>Troubleshooting:</strong>
+      </div>
+      <ul style="margin: 5px 0; padding-left: 20px; font-size: 11px;">
+        <li>Check your username and password</li>
+        <li>Verify Alexandria server is accessible</li>
+        <li>Check browser console for CORS or network errors</li>
+        <li>Try from a different network if connection issues persist</li>
+      </ul>
+      <details style="margin-top: 10px;">
+        <summary style="cursor: pointer; font-size: 11px;">Show technical details</summary>
+        <div style="margin-top: 5px; font-family: monospace; background: #f1f1f1; padding: 8px; border-radius: 3px; font-size: 10px;">
+${error.stack || error.toString()}
+        </div>
+      </details>
+    `;
+    
+    // Remove existing error if any
+    const existingError = authForm.querySelector('.auth-error');
+    if (existingError) {
+      existingError.remove();
+    }
+    
+    errorDiv.className = 'auth-error';
+    authForm.appendChild(errorDiv);
+  }
+}
+
+function copyTokenResponse() {
+  if (window.lastTokenResponse) {
+    const text = JSON.stringify(window.lastTokenResponse, null, 2);
+    navigator.clipboard.writeText(text).then(() => {
+      alert('Token response copied to clipboard!');
+    }).catch(() => {
+      // Fallback for older browsers
+      const textArea = document.createElement('textarea');
+      textArea.value = text;
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textArea);
+      alert('Token response copied to clipboard!');
+    });
+  }
+}
+
+function resetAuth() {
+  authToken = null;
+  clearTokenFromCache(); // Clear cached token as well
+  const authForm = document.getElementById('auth-form');
+  const authStatus = document.getElementById('auth-status');
+  const loginBtn = document.getElementById('auth-login');
+  const usernameInput = document.getElementById('auth-username');
+  const passwordInput = document.getElementById('auth-password');
+  
+  // Clear stored response
+  window.lastTokenResponse = null;
+  
+  // Reset form
+  authForm.style.display = 'block';
+  authStatus.style.display = 'none';
+  loginBtn.textContent = '� Login & Get Token';
+  loginBtn.disabled = false;
+  
+  // Clear inputs
+  if (usernameInput) usernameInput.value = '';
+  if (passwordInput) passwordInput.value = '';
+  
+  // Remove any error messages
+  const existingError = authForm ? authForm.querySelector('.auth-error') : null;
+  if (existingError) {
+    existingError.remove();
+  }
+  
+  console.log('[AUTH] Reset authentication form and cleared cached token');
+}
+
+function generateAISummary() {
+  console.log('[popup.js] Generating AI summary...');
+  
+  const summaryContent = document.getElementById('ai-summary-content');
+  if (!summaryContent) return;
+  
+  // Show loading state
+  summaryContent.innerHTML = `
+    <div class="ai-loading">
+      <div class="loading-spinner"></div>
+      Analyzing current session data with AI...
+    </div>
+  `;
+  
+  // Use current session data if available, otherwise get fresh data
+  if (currentSessionData && currentSessionData.requests && currentSessionData.requests.length > 0) {
+    console.log('[popup.js] Using current session data for AI analysis:', currentSessionData.sessionId);
+    
+    // Simulate AI processing delay
+    setTimeout(() => {
+      const analysis = analyzeSessionData(currentSessionData.requests, currentSessionData);
+      aiAnalysisData = analysis;
+      displayAIAnalysis(analysis);
+      
+      summaryContent.innerHTML = `
+        <div class="ai-success">
+          ✅ AI analysis completed for current session!
+        </div>
+        <div style="margin-top: 15px;">
+          <h4>🧠 Current Session Intelligence Report</h4>
+          <p><strong>Session ID:</strong> ${currentSessionData.sessionId}</p>
+          <p><strong>Total Requests:</strong> ${analysis.totalRequests}</p>
+          <p><strong>Session Duration:</strong> ${analysis.sessionDuration}</p>
+          <p><strong>Average Response Time:</strong> ${analysis.avgResponseTime}ms</p>
+          <p><strong>Success Rate:</strong> ${analysis.successRate}%</p>
+          <p><strong>Performance Score:</strong> ${analysis.performanceScore}/100</p>
+          
+          <h4>📊 Key Insights</h4>
+          <ul>
+            ${analysis.insights.map(insight => `<li>${insight}</li>`).join('')}
+          </ul>
+        </div>
+      `;
+    }, 1500);
+  } else {
+    // Fallback: try to get fresh data and filter by current domain
+    getNetworkData((response) => {
+      if (!response?.data || response.data.length === 0) {
+        summaryContent.innerHTML = `
+          <div class="ai-error">
+            No session data available to analyze. Please capture some network requests first.
+          </div>
+        `;
+        return;
+      }
+      
+      // Get current active domain from the tab
+      chrome.tabs.query({ active: true, currentWindow: true }, function(tabs) {
+        const activeTab = tabs[0];
+        if (!activeTab) {
+          summaryContent.innerHTML = `
+            <div class="ai-error">
+              Unable to determine current tab for session analysis.
+            </div>
+          `;
+          return;
+        }
+        
+        const activeDomain = new URL(activeTab.url).hostname;
+        console.log('[popup.js] Creating session summary for AI analysis with domain:', activeDomain);
+        
+        // Create session summary for current domain
+        const sessionSummary = createSessionSummary(response.data, activeDomain);
+        
+        if (!sessionSummary || !sessionSummary.requests || sessionSummary.requests.length === 0) {
+          summaryContent.innerHTML = `
+            <div class="ai-error">
+              No session data found for current domain: ${activeDomain}. Please ensure you're on the correct site and have captured some requests.
+            </div>
+          `;
+          return;
+        }
+        
+        // Simulate AI processing delay
+        setTimeout(() => {
+          const analysis = analyzeSessionData(sessionSummary.requests, sessionSummary);
+          aiAnalysisData = analysis;
+          displayAIAnalysis(analysis);
+          
+          summaryContent.innerHTML = `
+            <div class="ai-success">
+              ✅ AI analysis completed for current session!
+            </div>
+            <div style="margin-top: 15px;">
+              <h4>🧠 Current Session Intelligence Report</h4>
+              <p><strong>Domain:</strong> ${activeDomain}</p>
+              <p><strong>Session ID:</strong> ${sessionSummary.sessionId}</p>
+              <p><strong>Total Requests:</strong> ${analysis.totalRequests}</p>
+              <p><strong>Session Duration:</strong> ${analysis.sessionDuration}</p>
+              <p><strong>Average Response Time:</strong> ${analysis.avgResponseTime}ms</p>
+              <p><strong>Success Rate:</strong> ${analysis.successRate}%</p>
+              <p><strong>Performance Score:</strong> ${analysis.performanceScore}/100</p>
+              
+              <h4>📊 Key Insights</h4>
+              <ul>
+                ${analysis.insights.map(insight => `<li>${insight}</li>`).join('')}
+              </ul>
+            </div>
+          `;
+        }, 1500);
+      });
+    });
+  }
+}
+
+function analyzePerformance() {
+  console.log('[popup.js] Analyzing performance...');
+  
+  if (!aiAnalysisData) {
+    alert('Please generate a summary first to analyze performance.');
+    return;
+  }
+  
+  // Performance analysis is already done in the main analysis
+  displayPerformanceAnalysis(aiAnalysisData);
+}
+
+function detectIssues() {
+  console.log('[popup.js] Detecting issues...');
+  
+  if (!aiAnalysisData) {
+    alert('Please generate a summary first to detect issues.');
+    return;
+  }
+  
+  displayIssueDetection(aiAnalysisData);
+}
+
+function clearAIAnalysis() {
+  console.log('[popup.js] Clearing AI analysis...');
+  
+  aiAnalysisData = null;
+  
+  // Reset all content areas
+  const summaryContent = document.getElementById('ai-summary-content');
+  const slowRequestsList = document.getElementById('slow-requests-list');
+  const errorAnalysisList = document.getElementById('error-analysis-list');
+  const performanceTrends = document.getElementById('performance-trends');
+  const optimizationTips = document.getElementById('optimization-tips');
+  const healthScoreValue = document.getElementById('health-score-value');
+  const healthBreakdown = document.getElementById('health-breakdown');
+  const recommendationsContent = document.getElementById('ai-recommendations-content');
+  
+  if (summaryContent) {
+    summaryContent.innerHTML = `
+      <div class="ai-placeholder">
+        <span class="ai-placeholder-icon">🤖</span>
+        <p>Click "Generate Smart Summary" to get AI-powered insights about your session</p>
+      </div>
+    `;
+  }
+  
+  if (slowRequestsList) {
+    slowRequestsList.innerHTML = '<div class="analytics-placeholder">No analysis available. Generate summary first.</div>';
+  }
+  
+  if (errorAnalysisList) {
+    errorAnalysisList.innerHTML = '<div class="analytics-placeholder">No analysis available. Generate summary first.</div>';
+  }
+  
+  if (performanceTrends) {
+    performanceTrends.innerHTML = '<div class="analytics-placeholder">No analysis available. Generate summary first.</div>';
+  }
+  
+  if (optimizationTips) {
+    optimizationTips.innerHTML = '<div class="analytics-placeholder">No analysis available. Generate summary first.</div>';
+  }
+  
+  if (healthScoreValue) {
+    healthScoreValue.textContent = '--';
+  }
+  
+  if (healthBreakdown) {
+    healthBreakdown.innerHTML = '<div class="health-placeholder">Generate analysis to see health score</div>';
+  }
+  
+  if (recommendationsContent) {
+    recommendationsContent.innerHTML = `
+      <div class="recommendations-list">
+        <div class="ai-placeholder">
+          <span class="ai-placeholder-icon">💡</span>
+          <p>AI recommendations will appear here after analysis</p>
+        </div>
+      </div>
+    `;
+  }
+}
+
+function analyzeSessionData(data, sessionInfo = null) {
+  const analysis = {
+    totalRequests: data.length,
+    sessionStart: Math.min(...data.map(r => r.startTime).filter(t => t)),
+    sessionEnd: Math.max(...data.map(r => r.endTime || r.startTime).filter(t => t)),
+    slowRequests: [],
+    errors: [],
+    insights: [],
+    recommendations: [],
+    sessionId: sessionInfo ? sessionInfo.sessionId : 'Unknown',
+    activeDomain: sessionInfo ? sessionInfo.activeDomain : 'Unknown'
+  };
+  
+  // Calculate session duration
+  analysis.sessionDuration = formatDuration(analysis.sessionEnd - analysis.sessionStart);
+  
+  // Analyze response times
+  const responseTimes = data
+    .filter(r => r.startTime && r.endTime)
+    .map(r => r.endTime - r.startTime);
+  
+  analysis.avgResponseTime = responseTimes.length > 0 
+    ? Math.round(responseTimes.reduce((a, b) => a + b, 0) / responseTimes.length)
+    : 0;
+  
+  // Find slow requests (> 2 seconds), or top 5 requests if no slow ones exist
+  const slowRequestsFilter = data.filter(r => r.startTime && r.endTime && (r.endTime - r.startTime) > 2000);
+  
+  if (slowRequestsFilter.length > 0) {
+    // Show top 3 slow requests (> 2 seconds)
+    analysis.slowRequests = slowRequestsFilter
+      .sort((a, b) => (b.endTime - b.startTime) - (a.endTime - a.startTime))
+      .slice(0, 3)
+      .map(r => ({
+        url: r.url,
+        responseTime: r.endTime - r.startTime
+      }));
+  } else {
+    // No slow requests, show top 5 requests sorted by response time
+    analysis.slowRequests = data
+      .filter(r => r.startTime && r.endTime)
+      .sort((a, b) => (b.endTime - b.startTime) - (a.endTime - a.startTime))
+      .slice(0, 5)
+      .map(r => ({
+        url: r.url,
+        responseTime: r.endTime - r.startTime
+      }));
+  }
+  
+  // Find errors
+  analysis.errors = data
+    .filter(r => r.statusCode && r.statusCode >= 400)
+    .slice(0, 5)
+    .map(r => ({
+      url: r.url, // Keep full URL for display, truncation handled in display functions
+      statusCode: r.statusCode,
+      statusText: r.statusText || 'Error',
+      responseTime: (r.startTime && r.endTime) ? r.endTime - r.startTime : null
+    }));
+  
+  // Calculate success rate
+  const successfulRequests = data.filter(r => r.statusCode && r.statusCode < 400).length;
+  analysis.successRate = data.length > 0 ? Math.round((successfulRequests / data.length) * 100) : 0;
+  
+  // Calculate performance score
+  analysis.performanceScore = calculatePerformanceScore(analysis);
+  
+  // Generate insights with session context
+  generateInsights(analysis);
+  
+  // Generate recommendations
+  generateRecommendations(analysis);
+  
+  return analysis;
+}
+
+function displayAIAnalysis(analysis) {
+  displaySlowRequests(analysis.slowRequests);
+  displayErrorAnalysis(analysis.errors);
+  displayPerformanceMetrics(analysis);
+  displayHealthScore(analysis.performanceScore);
+  displayRecommendations(analysis.recommendations);
+}
+
+function displaySlowRequests(slowRequests) {
+  const slowRequestsList = document.getElementById('slow-requests-list');
+  const slowRequestsTitle = document.getElementById('slow-requests-title');
+  if (!slowRequestsList) return;
+  
+  if (slowRequests.length === 0) {
+    slowRequestsList.innerHTML = '<div class="analytics-placeholder">No requests found! 📭</div>';
+    if (slowRequestsTitle) {
+      slowRequestsTitle.textContent = '⏱️ Slow Requests';
+    }
+    return;
+  }
+  
+  // Check if any request is actually slow (> 2 seconds)
+  const hasSlowRequests = slowRequests.some(req => req.responseTime > 2000);
+  
+  // Update title based on content
+  if (slowRequestsTitle) {
+    if (hasSlowRequests) {
+      slowRequestsTitle.textContent = '🐌 Slow Requests';
+    } else {
+      slowRequestsTitle.textContent = '⚡ Top Requests by Time';
+    }
+  }
+  
+  const html = slowRequests.map((req, index) => `
+    <div class="slow-request-item">
+      <span class="slow-request-url" title="${req.url}">
+        ${hasSlowRequests ? '' : `${index + 1}. `}${truncateUrl(req.url, 100)}
+      </span>
+      <span class="slow-request-time">${Math.round(req.responseTime)}ms</span>
+    </div>
+  `).join('');
+  
+  slowRequestsList.innerHTML = html;
+}
+
+function displayErrorAnalysis(errors) {
+  const errorAnalysisList = document.getElementById('error-analysis-list');
+  if (!errorAnalysisList) return;
+  
+  if (errors.length === 0) {
+    errorAnalysisList.innerHTML = '<div class="analytics-placeholder">No errors detected! ✨</div>';
+    return;
+  }
+  
+  const html = errors.map(error => `
+    <div class="error-item">
+      <span class="error-status">${error.statusCode}</span>
+      <span class="error-url" title="${error.url}">${truncateUrl(error.url, 100)}</span>
+      ${error.responseTime !== null ? 
+        `<span class="error-time">${Math.round(error.responseTime)}ms</span>` : 
+        '<span class="error-time">N/A</span>'
+      }
+    </div>
+  `).join('');
+  
+  errorAnalysisList.innerHTML = html;
+}
+
+function displayPerformanceMetrics(analysis) {
+  const performanceTrends = document.getElementById('performance-trends');
+  if (!performanceTrends) return;
+  
+  const html = `
+    <div class="performance-metric">
+      <span class="metric-label">Avg Response Time:</span>
+      <span class="metric-value">${analysis.avgResponseTime}ms</span>
+    </div>
+    <div class="performance-metric">
+      <span class="metric-label">Success Rate:</span>
+      <span class="metric-value">${analysis.successRate}%</span>
+    </div>
+    <div class="performance-metric">
+      <span class="metric-label">Total Requests:</span>
+      <span class="metric-value">${analysis.totalRequests}</span>
+    </div>
+    <div class="performance-metric">
+      <span class="metric-label">Session Duration:</span>
+      <span class="metric-value">${analysis.sessionDuration}</span>
+    </div>
+  `;
+  
+  performanceTrends.innerHTML = html;
+}
+
+function displayHealthScore(score) {
+  const healthScoreValue = document.getElementById('health-score-value');
+  const healthBreakdown = document.getElementById('health-breakdown');
+  
+  if (healthScoreValue) {
+    healthScoreValue.textContent = score;
+    
+    // Update the conic gradient based on score
+    const scorePercent = score;
+    const healthCircle = document.querySelector('.health-score-circle');
+    if (healthCircle) {
+      healthCircle.style.setProperty('--score-percent', `${scorePercent}%`);
+      
+      // Update color based on score
+      let color = '#ff6b6b'; // Red for low scores
+      if (score >= 70) color = '#4CAF50'; // Green for good scores
+      else if (score >= 50) color = '#ff9800'; // Orange for medium scores
+      
+      healthCircle.style.background = `conic-gradient(from 0deg, ${color} 0% ${scorePercent}%, #e0e0e0 ${scorePercent}% 100%)`;
+    }
+  }
+  
+  if (healthBreakdown) {
+    let status = 'Poor';
+    let statusColor = '#f44336';
+    
+    if (score >= 80) {
+      status = 'Excellent';
+      statusColor = '#4CAF50';
+    } else if (score >= 60) {
+      status = 'Good';
+      statusColor = '#8BC34A';
+    } else if (score >= 40) {
+      status = 'Fair';
+      statusColor = '#ff9800';
+    }
+    
+    healthBreakdown.innerHTML = `
+      <div style="color: ${statusColor}; font-weight: 600; margin-bottom: 10px;">
+        Status: ${status}
+      </div>
+      <div style="font-size: 11px; color: #666;">
+        Health score is calculated based on response times, error rates, and overall session performance.
+      </div>
+    `;
+  }
+}
+
+function displayRecommendations(recommendations) {
+  const recommendationsContent = document.getElementById('ai-recommendations-content');
+  if (!recommendationsContent) return;
+  
+  if (recommendations.length === 0) {
+    recommendationsContent.innerHTML = `
+      <div class="recommendations-list">
+        <div class="ai-placeholder">
+          <span class="ai-placeholder-icon">🎉</span>
+          <p>Great job! No specific recommendations at this time.</p>
+        </div>
+      </div>
+    `;
+    return;
+  }
+  
+  const html = recommendations.map(rec => `
+    <div class="recommendation-item">
+      <div class="recommendation-title">${rec.title}</div>
+      <p class="recommendation-text">${rec.description}</p>
+    </div>
+  `).join('');
+  
+  recommendationsContent.innerHTML = `<div class="recommendations-list">${html}</div>`;
+}
+
+function displayPerformanceAnalysis(analysis) {
+  const optimizationTips = document.getElementById('optimization-tips');
+  if (!optimizationTips) return;
+  
+  const tips = [];
+  
+  if (analysis.avgResponseTime > 1000) {
+    tips.push('Consider implementing caching to reduce response times');
+  }
+  
+  if (analysis.slowRequests.length > 0) {
+    tips.push('Optimize slow endpoints identified in the analysis');
+  }
+  
+  if (analysis.errors.length > 0) {
+    tips.push('Review and fix error-prone requests');
+  }
+  
+  if (analysis.totalRequests > 50) {
+    tips.push('Consider request batching to reduce network calls');
+  }
+  
+  if (tips.length === 0) {
+    optimizationTips.innerHTML = '<div class="analytics-placeholder">Performance looks good! 🚀</div>';
+    return;
+  }
+  
+  const html = tips.map(tip => `<div style="padding: 4px 0; font-size: 11px;">• ${tip}</div>`).join('');
+  optimizationTips.innerHTML = html;
+}
+
+function displayIssueDetection(analysis) {
+  const issues = [];
+  
+  if (analysis.errors.length > 0) {
+    issues.push(`Found ${analysis.errors.length} error(s) in the session`);
+  }
+  
+  if (analysis.slowRequests.length > 0) {
+    issues.push(`Detected ${analysis.slowRequests.length} slow request(s)`);
+  }
+  
+  if (analysis.successRate < 90) {
+    issues.push(`Low success rate: ${analysis.successRate}%`);
+  }
+  
+  if (issues.length === 0) {
+    alert('✅ No critical issues detected in the current session!');
+  } else {
+    alert('⚠️ Issues detected:\n\n' + issues.map(issue => `• ${issue}`).join('\n'));
+  }
+}
+
+function calculatePerformanceScore(analysis) {
+  let score = 100;
+  
+  // Deduct points for slow average response time
+  if (analysis.avgResponseTime > 2000) score -= 30;
+  else if (analysis.avgResponseTime > 1000) score -= 15;
+  else if (analysis.avgResponseTime > 500) score -= 5;
+  
+  // Deduct points for errors
+  if (analysis.errors.length > 0) {
+    score -= Math.min(analysis.errors.length * 10, 40);
+  }
+  
+  // Deduct points for low success rate
+  if (analysis.successRate < 100) {
+    score -= (100 - analysis.successRate) / 2;
+  }
+  
+  // Deduct points for slow requests
+  if (analysis.slowRequests.length > 0) {
+    score -= Math.min(analysis.slowRequests.length * 5, 20);
+  }
+  
+  return Math.max(0, Math.round(score));
+}
+
+function generateInsights(analysis) {
+  const insights = [];
+  
+  // Session context insights
+  if (analysis.sessionId !== 'Unknown') {
+    insights.push(`🔍 Analyzing session ${analysis.sessionId} for domain: ${analysis.activeDomain}`);
+  }
+  
+  if (analysis.avgResponseTime < 500) {
+    insights.push('Excellent response times - your application is performing very well!');
+  } else if (analysis.avgResponseTime > 2000) {
+    insights.push('Response times are slower than optimal - consider performance optimization.');
+  }
+  
+  if (analysis.successRate === 100) {
+    insights.push('Perfect success rate - no errors detected in this session.');
+  } else if (analysis.successRate < 90) {
+    insights.push('Lower than expected success rate - investigate error patterns.');
+  }
+  
+  if (analysis.slowRequests.length === 0) {
+    insights.push('No slow requests detected - great job on optimization!');
+  } else {
+    insights.push(`🐌 Found ${analysis.slowRequests.length} slow requests in this session`);
+  }
+  
+  if (analysis.errors.length > 0) {
+    insights.push(`❌ ${analysis.errors.length} errors detected in current session`);
+  }
+  
+  if (analysis.totalRequests > 100) {
+    insights.push('High request volume detected - monitor for potential performance impact.');
+  } else if (analysis.totalRequests === 0) {
+    insights.push('ℹ️ No network requests captured in this session yet');
+  }
+  
+  // Session duration insights
+  if (analysis.sessionStart && analysis.sessionEnd) {
+    const sessionDurationMs = analysis.sessionEnd - analysis.sessionStart;
+    if (sessionDurationMs > 1800000) { // 30 minutes
+      insights.push('⏰ Long session duration - consider performance monitoring');
+    }
+  }
+  
+  if (insights.length === 1 && insights[0].includes('🔍 Analyzing session')) {
+    insights.push('Session analysis completed - review the detailed metrics below.');
+  } else if (insights.length === 0) {
+    insights.push('Session analysis completed - review the detailed metrics below.');
+  }
+  
+  analysis.insights = insights;
+}
+
+function generateRecommendations(analysis) {
+  const recommendations = [];
+  
+  // Session-specific recommendations
+  if (analysis.sessionId !== 'Unknown' && analysis.activeDomain !== 'Unknown') {
+    recommendations.push({
+      title: '🔍 Session Focus',
+      description: `Currently analyzing session ${analysis.sessionId} for domain: ${analysis.activeDomain}. Use this focused view to troubleshoot specific issues.`
+    });
+  }
+  
+  if (analysis.avgResponseTime > 1000) {
+    recommendations.push({
+      title: '🚀 Optimize Response Times',
+      description: 'Consider implementing caching, database query optimization, or CDN usage to improve response times.'
+    });
+  }
+  
+  if (analysis.errors.length > 0) {
+    recommendations.push({
+      title: '🛠️ Fix Error Responses',
+      description: `Review the ${analysis.errors.length} error responses in this session and implement proper error handling and validation.`
+    });
+  }
+  
+  if (analysis.slowRequests.length > 0) {
+    recommendations.push({
+      title: '⚡ Address Slow Endpoints',
+      description: `Focus on optimizing the ${analysis.slowRequests.length} slowest endpoints in this session to improve user experience.`
+    });
+  }
+  
+  if (analysis.totalRequests > 50) {
+    recommendations.push({
+      title: '📦 Consider Request Batching',
+      description: 'Implement request batching or pagination to reduce the number of network calls.'
+    });
+  }
+  
+  if (analysis.totalRequests === 0) {
+    recommendations.push({
+      title: '🎯 Start Monitoring',
+      description: 'Navigate to your application and perform actions to capture network requests for analysis.'
+    });
+  }
+  
+  // Performance score based recommendations
+  if (analysis.performanceScore < 60) {
+    recommendations.push({
+      title: '⚠️ Performance Improvement Needed',
+      description: 'This session has performance issues. Focus on reducing response times and fixing errors.'
+    });
+  } else if (analysis.performanceScore >= 90) {
+    recommendations.push({
+      title: '✨ Excellent Performance',
+      description: 'This session shows excellent performance. Consider documenting successful patterns for other areas.'
+    });
+  }
+  
+  analysis.recommendations = recommendations;
+}
+
+// Helper functions
+function truncateUrl(url, maxLength = 80) {
+  if (!url) return 'N/A';
+  if (url.length <= maxLength) return url;
+  
+  try {
+    const urlObj = new URL(url);
+    const pathname = urlObj.pathname;
+    const search = urlObj.search;
+    
+    // Show domain + meaningful part of path
+    let meaningful = urlObj.hostname + pathname;
+    if (search) {
+      meaningful += search.substring(0, 20); // Show some query params
+    }
+    
+    if (meaningful.length <= maxLength) return meaningful;
+    
+    // If still too long, truncate smartly
+    if (pathname.includes('/')) {
+      const pathParts = pathname.split('/');
+      const lastPart = pathParts[pathParts.length - 1];
+      meaningful = urlObj.hostname + '/.../' + lastPart;
+      if (search) meaningful += search.substring(0, 15);
+    }
+    
+    if (meaningful.length <= maxLength) return meaningful;
+    return meaningful.substring(0, maxLength - 3) + '...';
+  } catch (e) {
+    // Fallback for invalid URLs
+    return url.length <= maxLength ? url : url.substring(0, maxLength - 3) + '...';
+  }
+}
+
+function formatDuration(milliseconds) {
+  if (milliseconds < 1000) return `${Math.round(milliseconds)}ms`;
+  if (milliseconds < 60000) return `${Math.round(milliseconds / 1000)}s`;
+  return `${Math.round(milliseconds / 60000)}m`;
+}
+
+// ========== LOG SUMMARIZATION FUNCTIONALITY ==========
+
+// Token management with 8-hour caching
+let authToken = null;
+
+// Token cache configuration
+const TOKEN_CACHE_KEY = 'alexandria_auth_token';
+const TOKEN_EXPIRY_HOURS = 8;
+
+// Save token to persistent storage with expiration
+async function saveTokenToCache(token) {
+  if (!token) return;
+  
+  const tokenData = {
+    token: token,
+    timestamp: Date.now(),
+    expiresAt: Date.now() + (TOKEN_EXPIRY_HOURS * 60 * 60 * 1000) // 8 hours from now
+  };
+  
+  try {
+    await chrome.storage.local.set({ [TOKEN_CACHE_KEY]: tokenData });
+    console.log('[TOKEN_CACHE] Token saved to cache, expires at:', new Date(tokenData.expiresAt).toISOString());
+  } catch (error) {
+    console.warn('[TOKEN_CACHE] Failed to save token to cache:', error);
+  }
+}
+
+// Load token from persistent storage and check if it's still valid
+async function loadTokenFromCache() {
+  try {
+    const result = await chrome.storage.local.get([TOKEN_CACHE_KEY]);
+    const tokenData = result[TOKEN_CACHE_KEY];
+    
+    if (!tokenData) {
+      console.log('[TOKEN_CACHE] No cached token found');
+      return null;
+    }
+    
+    const now = Date.now();
+    const timeLeft = tokenData.expiresAt - now;
+    
+    if (timeLeft <= 0) {
+      console.log('[TOKEN_CACHE] Cached token has expired, removing from cache');
+      await chrome.storage.local.remove([TOKEN_CACHE_KEY]);
+      return null;
+    }
+    
+    const hoursLeft = Math.floor(timeLeft / (60 * 60 * 1000));
+    const minutesLeft = Math.floor((timeLeft % (60 * 60 * 1000)) / (60 * 1000));
+    
+    console.log(`[TOKEN_CACHE] Found valid cached token, expires in ${hoursLeft}h ${minutesLeft}m`);
+    console.log('[TOKEN_CACHE] Token preview:', tokenData.token.substring(0, 12) + '...' + tokenData.token.substring(tokenData.token.length - 8));
+    
+    return tokenData.token;
+  } catch (error) {
+    console.warn('[TOKEN_CACHE] Failed to load token from cache:', error);
+    return null;
+  }
+}
+
+// Clear token from cache
+async function clearTokenFromCache() {
+  try {
+    await chrome.storage.local.remove([TOKEN_CACHE_KEY]);
+    console.log('[TOKEN_CACHE] Token cleared from cache');
+  } catch (error) {
+    console.warn('[TOKEN_CACHE] Failed to clear token from cache:', error);
+  }
+}
+
+// Check if we have a valid cached token and load it
+async function initializeAuthToken() {
+  if (authToken) {
+    console.log('[TOKEN_CACHE] Token already loaded in memory');
+    return authToken;
+  }
+  
+  const cachedToken = await loadTokenFromCache();
+  if (cachedToken) {
+    authToken = cachedToken;
+    console.log('[TOKEN_CACHE] Using cached token for authentication');
+    return authToken;
+  }
+  
+  console.log('[TOKEN_CACHE] No valid cached token available, user will need to authenticate');
+  return null;
+}
+
+async function fetchAuthToken(username, password) {
+  try {
+    console.log('[AUTH] Fetching authentication token from Alexandria API...');
+    console.log('[AUTH] Username:', username);
+    
+    const requestBody = {
+      "name": username,
+      "pass": password
+    };
+    
+    console.log('[AUTH] Request body:', requestBody);
+    
+    const response = await fetch('https://alexandria.shs.aws.q2e.io/api/v3/login', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Pragma': 'no-cache',
+        'Accept': '*/*',
+        'Authorization': 'Bearer 00000000-0000-0000-0000-000000000000',
+        'Cache-Control': 'no-cache',
+        'Origin': 'https://alexandria.shs.aws.q2e.io',
+        'Referer': 'https://alexandria.shs.aws.q2e.io/',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+      },
+      body: JSON.stringify(requestBody)
+    });
+
+    console.log('[AUTH] Response received');
+    console.log('[AUTH] Response status:', response.status);
+    console.log('[AUTH] Response headers:', Object.fromEntries(response.headers.entries()));
+
+    if (!response.ok) {
+      let errorDetails = `Login failed! status: ${response.status}`;
+      try {
+        const errorBody = await response.text();
+        console.log('[AUTH] Error response body:', errorBody);
+        errorDetails += ` - ${errorBody}`;
+      } catch (e) {
+        console.log('[AUTH] Could not read error response body');
+      }
+      throw new Error(errorDetails);
+    }
+
+    const result = await response.json();
+    console.log('[AUTH] Login response:', result);
+    
+    // For now, just return the entire response to see what we get
+    return result;
+    
+  } catch (error) {
+    console.error('[AUTH] Error fetching auth token:', error);
+    
+    // Enhanced error information
+    if (error.name === 'TypeError' && error.message.includes('fetch')) {
+      throw new Error('Network error - CORS or connection issue. Check browser console for details.');
+    } else if (error.name === 'AbortError') {
+      throw new Error('Request timed out - server may be slow or unreachable.');
+    } else {
+      throw error;
+    }
+  }
+}
+
+async function summarizeLogsAPI(textQuery) {
+  try {
+    console.log('[API] Sending request to Alexandria API with text:', textQuery);
+    console.log('[API] Text query length:', textQuery ? textQuery.length : 0);
+    
+    // Use Alexandria token for authentication
+    if (!authToken) {
+      throw new Error('No authentication token available. Please log in first.');
+    }
+    
+    const tokenStr = authToken ? String(authToken) : null;
+    
+    // Validate the prompt length and content
+    if (!textQuery || textQuery.trim().length === 0) {
+      throw new Error('Empty prompt provided to Alexandria API');
+    }
+    
+    // Log prompt size but don't truncate - send full logs for better analysis
+    console.log(`[API] Sending prompt with ${textQuery.length} characters to Alexandria`);
+    if (textQuery.length > 10000) {
+      console.warn('[API] Large prompt detected but sending full content for better analysis');
+    }
+    
+    // Use Alexandria AI summarize format - send prompt as JSON string
+    const requestPayload = JSON.stringify(textQuery);
+    
+    const requestOptions = {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        "Pragma": "no-cache",
+        "Accept": "*/*",
+        "Authorization": `Bearer ${tokenStr}`,
+        "Sec-Fetch-Site": "same-origin",
+        "Accept-Language": "en-IN,en-GB;q=0.9,en;q=0.8",
+        "Cache-Control": "no-cache",
+        "Sec-Fetch-Mode": "cors",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Origin": "https://alexandria.shs.aws.q2e.io",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Safari/605.1.15",
+        "Referer": "https://alexandria.shs.aws.q2e.io/logs/search",
+        "Sec-Fetch-Dest": "empty",
+        "Priority": "u=3, i"
+      },
+      body: requestPayload
+    };
+    
+    console.log('[API] Request options:', requestOptions);
+    console.log('[API] Request payload size:', requestPayload.length);
+    console.log('[API] Request payload content:', requestPayload);
+    console.log('[API] Using Alexandria token:', tokenStr ? `${tokenStr.substring(0, 8)}...` : 'none');
+    
+    const response = await fetch("https://alexandria.shs.aws.q2e.io/api/v3/ai/summarize", requestOptions);
+
+    console.log('[API] Response status:', response.status);
+    console.log('[API] Response status text:', response.statusText);
+    console.log('[API] Response headers:', Object.fromEntries(response.headers.entries()));
+
+    if (!response.ok) {
+      let errorDetails = `HTTP error! status: ${response.status}`;
+      
+      // Handle specific error types
+      if (response.status === 401) {
+        errorDetails += ' - Authentication failed. The Alexandria token may be expired or invalid.';
+      } else if (response.status === 403) {
+        errorDetails += ' - Access forbidden. Check API permissions for Alexandria.';
+      } else if (response.status === 404) {
+        errorDetails += ' - API endpoint not found. Check the Alexandria URL.';
+      } else if (response.status === 500) {
+        errorDetails += ' - Internal server error. The Alexandria service may be experiencing issues.';
+      } else if (response.status === 502 || response.status === 503) {
+        errorDetails += ' - Service unavailable. Alexandria may be temporarily down.';
+      } else if (response.status === 429) {
+        errorDetails += ' - Rate limit exceeded. Too many requests to Alexandria API.';
+      }
+      
+      try {
+        const errorBody = await response.text();
+        console.log('[API] Error response body:', errorBody);
+        if (errorBody) {
+          errorDetails += ` Response: ${errorBody}`;
+        }
+      } catch (e) {
+        console.log('[API] Could not read error response body');
+      }
+      
+      throw new Error(errorDetails);
+    }
+
+    // Get response as text first to see what we're getting
+    const responseText = await response.text();
+    console.log('[API] Raw response text:', responseText);
+    console.log('[API] Response text length:', responseText.length);
+    
+    let result;
+    try {
+      // Try to parse as JSON
+      result = JSON.parse(responseText);
+      console.log('[API] Successfully parsed as JSON:', result);
+    } catch (jsonError) {
+      console.log('[API] Response is not JSON, treating as plain text');
+      // If it's not JSON, treat it as plain text response
+      result = {
+        summary: responseText,
+        response: responseText,
+        isPlainText: true
+      };
+    }
+    
+    console.log('[API] Final processed result:', result);
+    
+    // Transform Alexandria response to match expected format
+    if (result.isPlainText) {
+      // Handle plain text response
+      return {
+        summary: `Alexandria AI Analysis:\n\n${result.summary}`,
+        response: result.response,
+        alexandriaResults: { analysisText: result.response }
+      };
+    } else {
+      // Handle JSON response
+      return {
+        summary: `Alexandria AI Analysis:\n\n${result.summary || result.response || 'Analysis completed'}`,
+        response: result,
+        alexandriaResults: result
+      };
+    }
+  } catch (error) {
+    console.error('[API] Error while summarizing:', error);
+    throw error;
+  }
+}
+
+// Alexandria logs query function
+async function queryAlexandriaLogs(token, query, refererUrl = null) {
+  try {
+    // ========== FUNCTION INPUT LOGGING ==========
+    console.log('🎯 [ALEXANDRIA] ========== QUERY FUNCTION CALLED ==========');
+    console.log('📅 [ALEXANDRIA] Timestamp:', new Date().toISOString());
+    
+    // Ensure token is a string
+    const tokenStr = token ? String(token) : null;
+    
+    console.log('🔐 [ALEXANDRIA] Token Analysis:');
+    console.log('   Token provided:', !!token);
+    console.log('   Token type:', typeof token);
+    if (tokenStr) {
+      console.log('   Token length:', tokenStr.length, 'characters');
+      console.log('   Token preview:', `${tokenStr.substring(0, 12)}...${tokenStr.substring(tokenStr.length - 8)}`);
+      console.log('   Token starts with:', tokenStr.substring(0, 5));
+    } else {
+      console.log('   Token: null/undefined');
+    }
+    
+    console.log('🔍 [ALEXANDRIA] Query Analysis:');
+    console.log('   Query provided:', !!query);
+    console.log('   Query type:', typeof query);
+    console.log('   Query length:', query ? query.length : 0, 'characters');
+    console.log('   Query content:', query);
+    
+    console.log('🌐 [ALEXANDRIA] Referer Analysis:');
+    console.log('   Referer URL provided:', !!refererUrl);
+    console.log('   Referer URL:', refererUrl);
+    
+    if (!tokenStr) {
+      console.log('❌ [ALEXANDRIA] ERROR: No valid authentication token available');
+      throw new Error('No valid authentication token available');
+    }
+    
+    // Build referer from the current session URLs if available
+    let referer = 'https://alexandria.shs.aws.q2e.io/logs/search';
+    if (refererUrl) {
+      referer = refererUrl;
+    } else {
+      // Use current query URLs as referer base
+      const currentUrls = getCurrentSessionUrls();
+      if (currentUrls.length > 0) {
+        // Create a search query URL with the current session context
+        const encodedQuery = encodeURIComponent(query);
+        referer = `https://alexandria.shs.aws.q2e.io/logs/search?query=${encodedQuery}`;
+      }
+    }
+    
+    const requestPayload = {
+      "query": query,
+      "isRetry": false,
+      "isDownload": false,
+      "isLegacyFormat": false,
+      "queryLanguage": "Splunk SPL",
+      "dataSource": "SentinelOne"
+    };
+    
+    const requestOptions = {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        "Pragma": "no-cache",
+        "Accept": "*/*",
+        "Authorization": `Bearer ${tokenStr}`,
+        "Sec-Fetch-Site": "same-origin",
+        "Accept-Language": "en-IN,en-GB;q=0.9,en;q=0.8",
+        "Cache-Control": "no-cache",
+        "Sec-Fetch-Mode": "cors",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Origin": "https://alexandria.shs.aws.q2e.io",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Safari/605.1.15",
+        "Referer": referer,
+        "Sec-Fetch-Dest": "empty",
+        "Priority": "u=3, i"
+      },
+      body: JSON.stringify(requestPayload)
+    };
+    
+    // ========== DETAILED ALEXANDRIA REQUEST LOGGING ==========
+    console.log('🚀 [ALEXANDRIA] ========== SENDING REQUEST ==========');
+    console.log('📍 [ALEXANDRIA] Endpoint:', 'https://alexandria.shs.aws.q2e.io/api/v3/logs/query');
+    console.log('📋 [ALEXANDRIA] Request Method:', 'POST');
+    console.log('🔑 [ALEXANDRIA] Authorization token length:', tokenStr.length, 'characters');
+    console.log('🔗 [ALEXANDRIA] Referer:', referer);
+    
+    console.log('📦 [ALEXANDRIA] Request Headers:');
+    Object.entries(requestOptions.headers).forEach(([key, value]) => {
+      if (key.toLowerCase() === 'authorization') {
+        console.log(`   ${key}: Bearer ${value.substring(7, 20)}...${value.substring(value.length - 10)} (${value.length - 7} chars)`);
+      } else {
+        console.log(`   ${key}: ${value}`);
+      }
+    });
+    
+    console.log('📄 [ALEXANDRIA] Request Payload Object:');
+    console.log('   searchId:', requestPayload.searchId || '(empty)');
+    console.log('   query:', requestPayload.query);
+    console.log('   timeArgs:', requestPayload.timeArgs);
+    console.log('   isRetry:', requestPayload.isRetry);
+    console.log('   isDownload:', requestPayload.isDownload);
+    console.log('   isLegacyFormat:', requestPayload.isLegacyFormat);
+    console.log('   maxCount:', requestPayload.maxCount);
+    console.log('   queryLanguage:', requestPayload.queryLanguage);
+    console.log('   dataSource:', requestPayload.dataSource);
+    
+    console.log('🔍 [ALEXANDRIA] Query Details:');
+    console.log('   Query length:', requestPayload.query.length, 'characters');
+    console.log('   Query content:', requestPayload.query);
+    
+    const requestBodyString = JSON.stringify(requestPayload);
+    console.log('📊 [ALEXANDRIA] Request Body Stats:');
+    console.log('   Body size:', requestBodyString.length, 'characters');
+    console.log('   Body size:', new Blob([requestBodyString]).size, 'bytes');
+    
+    console.log('💾 [ALEXANDRIA] Full Request Payload (JSON):');
+    console.log(JSON.stringify(requestPayload, null, 2));
+    
+    console.log('⚡ [ALEXANDRIA] PowerShell Equivalent:');
+    console.log(`$Headers = @{
+    'Content-Type' = 'application/json; charset=utf-8'
+    'Authorization' = 'Bearer ${tokenStr.substring(0, 20)}...'
+}
+$Body = '${JSON.stringify(requestPayload, null, 2)}'
+$Response = Invoke-RestMethod -Uri 'https://alexandria.shs.aws.q2e.io/api/v3/logs/query' -Method POST -Headers $Headers -Body $Body`);
+    
+    console.log('🌐 [ALEXANDRIA] Making fetch request now...');
+    
+    const response = await fetch("https://alexandria.shs.aws.q2e.io/api/v3/logs/query", requestOptions);
+    
+    // ========== DETAILED ALEXANDRIA RESPONSE LOGGING ==========
+    console.log('📥 [ALEXANDRIA] ========== RESPONSE RECEIVED ==========');
+    console.log('📊 [ALEXANDRIA] Response Status:', response.status, response.statusText);
+    console.log('🕒 [ALEXANDRIA] Response received at:', new Date().toISOString());
+    
+    console.log('📋 [ALEXANDRIA] Response Headers:');
+    const responseHeaders = Object.fromEntries(response.headers.entries());
+    Object.entries(responseHeaders).forEach(([key, value]) => {
+      console.log(`   ${key}: ${value}`);
+    });
+    
+    console.log('💡 [ALEXANDRIA] Response Info:');
+    console.log('   Type:', response.type);
+    console.log('   URL:', response.url);
+    console.log('   Redirected:', response.redirected);
+    console.log('   Ok:', response.ok);
+    console.log('   Status:', response.status);
+    console.log('   Status Text:', response.statusText);
+    
+    if (responseHeaders['content-length']) {
+      console.log('   Content Length:', responseHeaders['content-length'], 'bytes');
+    }
+    if (responseHeaders['content-type']) {
+      console.log('   Content Type:', responseHeaders['content-type']);
+    }
+    
+    if (!response.ok) {
+      console.log('❌ [ALEXANDRIA] ========== ERROR RESPONSE ==========');
+      let errorDetails = `HTTP error! status: ${response.status}`;
+      
+      if (response.status === 401) {
+        errorDetails += ' - Authentication failed. The token may be expired or invalid.';
+        console.log('🔑 [ALEXANDRIA] Authentication Error: Token may be expired or invalid');
+        console.log('🔑 [ALEXANDRIA] Token preview:', tokenStr.substring(0, 20) + '...' + tokenStr.substring(tokenStr.length - 10));
+      } else if (response.status === 403) {
+        errorDetails += ' - Access forbidden. Check API permissions.';
+        console.log('🚫 [ALEXANDRIA] Access Forbidden: Check API permissions for this user/token');
+      } else if (response.status === 404) {
+        errorDetails += ' - API endpoint not found.';
+        console.log('🔍 [ALEXANDRIA] Endpoint Not Found: API path may be incorrect');
+      } else if (response.status === 400) {
+        console.log('📝 [ALEXANDRIA] Bad Request: Request payload may be invalid');
+      } else if (response.status >= 500) {
+        console.log('🔥 [ALEXANDRIA] Server Error: Alexandria service may be down');
+      }
+      
+      try {
+        const errorBody = await response.text();
+        console.log('📄 [ALEXANDRIA] Error Response Body Length:', errorBody.length, 'characters');
+        console.log('📄 [ALEXANDRIA] Error Response Body:', errorBody);
+        
+        // Try to parse error as JSON for better formatting
+        try {
+          const errorJson = JSON.parse(errorBody);
+          console.log('📄 [ALEXANDRIA] Parsed Error JSON:', JSON.stringify(errorJson, null, 2));
+        } catch (e) {
+          console.log('📄 [ALEXANDRIA] Error body is not valid JSON, showing as text');
+        }
+        
+        if (errorBody) {
+          errorDetails += ` Response: ${errorBody}`;
+        }
+      } catch (e) {
+        console.log('⚠️  [ALEXANDRIA] Could not read error response body:', e.message);
+      }
+      
+      console.log('❌ [ALEXANDRIA] Throwing error:', errorDetails);
+      throw new Error(errorDetails);
+    }
+    
+    // ========== SUCCESS RESPONSE PROCESSING ==========
+    console.log('✅ [ALEXANDRIA] ========== SUCCESS RESPONSE ==========');
+    console.log('📥 [ALEXANDRIA] Reading response body as JSON...');
+    
+    const result = await response.json();
+    
+    console.log('📊 [ALEXANDRIA] Response Data Stats:');
+    console.log('   Result type:', typeof result);
+    console.log('   Result is array:', Array.isArray(result));
+    
+    if (result && typeof result === 'object') {
+      console.log('   Object keys:', Object.keys(result));
+      
+      if (result.Data && Array.isArray(result.Data)) {
+        console.log('   Data array length:', result.Data.length);
+        console.log('   First few results:', result.Data.slice(0, 3));
+      }
+      
+      if (result.summary) {
+        console.log('   Summary:', result.summary);
+      }
+      
+      if (result.status) {
+        console.log('   API Status:', result.status);
+      }
+    }
+    
+    console.log('📄 [ALEXANDRIA] Full Success Response:');
+    console.log(JSON.stringify(result, null, 2));
+    console.log('✅ [ALEXANDRIA] ========== END SUCCESS RESPONSE ==========');
+    
+    return result;
+    
+  } catch (error) {
+    console.error('[ALEXANDRIA] Error while querying logs:', error);
+    throw error;
+  }
+}
+
+// Helper function to get current session data (used by Alexandria integration)
+function getSessionData() {
+  return currentSessionData || { requests: [], sessionId: null };
+}
+
+// Helper function to get current session URLs for referer
+function getCurrentSessionUrls() {
+  try {
+    const sessionData = getSessionData();
+    const allRequests = sessionData.requests || [];
+    return allRequests.map(req => req.url).filter(url => url);
+  } catch (error) {
+    console.warn('[ALEXANDRIA] Could not get current session URLs:', error);
+    return [];
+  }
+}
+
+// Helper function to extract query from existing Alexandria URLs
+function extractQueryFromSession() {
+  const sessionData = getSessionData();
+  if (!sessionData) {
+    console.warn('[ALEXANDRIA] No session data available');
+    return null;
+  }
+
+  // Get the workstation ID from session
+  const workstationId = sessionData.workstationId || 'N/A';
+  const sessionId = sessionData.sessionId;
+  const startTime = formatDateTime(sessionData.startTime);
+  const endTime = formatDateTime(sessionData.endTime);
+
+  // Determine environment from session requests (same logic as displaySessionSummary)
+  const isStaging = sessionData.requests?.some(r => r.url.includes('temporary')) || false;
+  
+  // Build the same queries as the session summary, but also add fallback queries with broader time ranges
+  const hqIndex = isStaging ? 'app_logs_stage_hq' : 'app_logs_prod_hq';
+  const lbIndex = isStaging ? 'app_logs_stage_lightbridge' : 'app_logs_prod_lightbridge';
+  const kaminoIndex = isStaging ? 'app_logs_stage_kamino' : 'app_logs_prod_kamino';
+  const ardentIndex = isStaging ? 'app_logs_stage_ardent' : 'app_logs_prod_ardent';
+
+  // Also check for dev environment like your curl example
+  const hqDevIndex = 'app_logs_dev_hq';
+  const lbDevIndex = 'app_logs_dev_lightbridge';
+  const kaminoDevIndex = 'app_logs_dev_kamino';
+  const ardentDevIndex = 'app_logs_dev_ardent';
+
+  // Use the exact working query from your PowerShell example
+  const workingQuery = `search index="app_logs_prod_hq" sessionId="4rvupzfaaq5rn2ix3wm2imjo" earliest="-8h" | fields * | extract | sort timestamp, seqId | head 10000`;
+  
+  const queries = {
+    // Primary working query - exact copy of your PowerShell example
+    working: workingQuery,
+    
+    // Simple fallbacks in case the sessionId changes
+    prod_simple: `search index="app_logs_prod_hq" earliest="-8h" | fields * | extract | sort timestamp, seqId | head 1000`,
+    prod_any: `search index="app_logs_prod_hq" | head 100`
+  };
+
+  console.log('[ALEXANDRIA] Generated queries from session:', {
+    sessionId,
+    workstationId,
+    isStaging,
+    environment: isStaging ? 'staging' : 'production',
+    timeRange: `${startTime} to ${endTime}`,
+    queries
+  });
+
+  // Debug: Log the exact queries that will be tried
+  console.log('[ALEXANDRIA] Query details:');
+  Object.entries(queries).forEach(([key, query]) => {
+    console.log(`[ALEXANDRIA] ${key}: ${query}`);
+  });
+
+  return queries;
+}
+
+function summarizeLogs() {
+  console.log('[popup.js] Starting comprehensive log summarization for all environments...');
+  
+  const logSummariesContent = document.getElementById('log-summaries-content');
+  if (!logSummariesContent) return;
+  
+  // Check if we have a token
+  if (!authToken) {
+    logSummariesContent.innerHTML = `
+      <div class="log-summary-error" style="padding: 20px;">
+        <div style="font-weight: 600; margin-bottom: 12px; font-size: 14px;">🔐 Authentication Required</div>
+        <div style="margin-bottom: 15px;">
+          Please login first to get an authentication token for the Alexandria API.
+        </div>
+        <div style="margin-bottom: 15px;">
+          <strong>Steps:</strong>
+          <ol style="margin: 8px 0; padding-left: 20px;">
+            <li>Scroll up to the Authentication section</li>
+            <li>Enter your Alexandria username and password</li>
+            <li>Click "Login & Get Token"</li>
+            <li>Return here and try again</li>
+          </ol>
+        </div>
+        <button onclick="document.getElementById('auth-username').focus()" style="padding: 8px 16px; background: #007acc; color: white; border: none; border-radius: 4px; cursor: pointer;">
+          📝 Go to Login Form
+        </button>
+      </div>
+    `;
+    return;
+  }
+
+  // Check if we have stored search strings from session summary
+  if (!window.environmentSearchStrings) {
+    logSummariesContent.innerHTML = `
+      <div class="log-summary-error" style="padding: 20px;">
+        <div style="font-weight: 600; margin-bottom: 12px; font-size: 14px;">📋 Session Data Required</div>
+        <div style="margin-bottom: 15px;">
+          No session data available for dynamic queries. Please ensure you have captured some network requests first.
+        </div>
+        <div style="margin-bottom: 15px;">
+          <strong>Steps:</strong>
+          <ol style="margin: 8px 0; padding-left: 20px;">
+            <li>Go to the Network Logs tab</li>
+            <li>Capture some network activity from your session</li>
+            <li>Come back and try again</li>
+          </ol>
+        </div>
+        <button onclick="switchToTab('network')" style="padding: 8px 16px; background: #007acc; color: white; border: none; border-radius: 4px; cursor: pointer;">
+          📊 Go to Network Logs
+        </button>
+      </div>
+    `;
+    return;
+  }
+  
+  // Show initial loading state
+  logSummariesContent.innerHTML = `
+    <div style="padding: 20px;">
+      <div style="font-weight: 600; margin-bottom: 15px; font-size: 16px; color: #007acc;">
+        🔍 Comprehensive Log Analysis
+      </div>
+      <div style="margin-bottom: 20px; font-size: 14px; color: #666;">
+        Querying Alexandria logs for all environments using dynamic session data...
+      </div>
+      <div class="ai-loading">
+        <div class="loading-spinner"></div>
+        Initializing multi-environment analysis...
+      </div>
+    </div>
+  `;
+  
+  // Start comprehensive analysis for all environments
+  proceedWithComprehensiveLogAnalysis().catch(error => {
+    console.error('[popup.js] Comprehensive log analysis failed:', error);
+    
+    let errorMessage = 'Unable to complete comprehensive log analysis.';
+    let troubleshooting = [];
+    
+    if (error.message.includes('401')) {
+      errorMessage = 'Authentication failed - your token may have expired.';
+      troubleshooting = [
+        'Try logging in again to refresh your token',
+        'Check if your Alexandria account has proper permissions',
+        'Verify the token format is correct'
+      ];
+    } else if (error.message.includes('403')) {
+      errorMessage = 'Access denied - insufficient permissions.';
+      troubleshooting = [
+        'Check if your account has log query permissions',
+        'Contact your administrator for access',
+        'Verify you\'re querying the correct data source'
+      ];
+    } else if (error.message.includes('404')) {
+      errorMessage = 'Alexandria logs API endpoint not found.';
+      troubleshooting = [
+        'Check if the Alexandria server is accessible',
+        'Verify the API endpoint URL is correct',
+        'Contact support if the service is down'
+      ];
+    } else if (error.message.includes('CORS') || error.message.includes('Network')) {
+      errorMessage = 'Network connectivity issue with Alexandria.';
+      troubleshooting = [
+        'Check your internet connection',
+        'Try from a different network',
+        'Contact IT support if behind corporate firewall'
+      ];
+    } else {
+      troubleshooting = [
+        'Check browser console for detailed errors',
+        'Try refreshing the page and logging in again',
+        'Contact support if the issue persists'
+      ];
+    }
+    
+    const technicalInfo = error.stack || error.toString();
+    
+    logSummariesContent.innerHTML = `
+      <div class="log-summary-error" style="padding: 20px;">
+        <div style="font-weight: 600; margin-bottom: 12px; font-size: 14px;">❌ ${errorMessage}</div>
+        <div style="margin-bottom: 15px;">
+          <strong>What you can try:</strong>
+          <ul style="margin: 8px 0; padding-left: 20px;">
+            ${troubleshooting.map(tip => `<li>${tip}</li>`).join('')}
+          </ul>
+        </div>
+        <div style="margin-bottom: 15px;">
+          <button onclick="summarizeLogs()" style="padding: 8px 16px; background: #007acc; color: white; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px;">
+            🔄 Try Again
+          </button>
+          <button onclick="resetAuth()" style="padding: 8px 16px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">
+            🔑 Login Again
+          </button>
+        </div>
+        <details style="margin-top: 15px;">
+          <summary style="cursor: pointer; font-size: 12px; color: #666;">Show technical details</summary>
+          <div style="margin-top: 10px; font-family: monospace; background: #f1f1f1; padding: 10px; border-radius: 4px; font-size: 11px; white-space: pre-wrap;">
+${technicalInfo}
+          </div>
+        </details>
+      </div>
+    `;
+  });
+}
+
+// New comprehensive analysis function for all environments
+async function proceedWithComprehensiveLogAnalysis() {
+  console.log('[COMPREHENSIVE] Starting analysis for all environments');
+  
+  const environments = ['HQ', 'Kamino', 'LightBridge', 'Ardent'];
+  const results = {};
+  const logSummariesContent = document.getElementById('log-summaries-content');
+  
+  // Initialize the results container
+  logSummariesContent.innerHTML = `
+    <div style="padding: 20px;">
+      <div style="font-weight: 600; margin-bottom: 15px; font-size: 16px; color: #28a745;">
+        🔍 Comprehensive Log Analysis - All Environments
+      </div>
+      <div style="margin-bottom: 20px; font-size: 14px; color: #666;">
+        Analyzing logs across HQ, Kamino, LightBridge, and Ardent environments...
+      </div>
+      
+      <div id="environment-results">
+        ${environments.map(env => `
+          <div id="result-${env.toLowerCase()}" style="margin-bottom: 20px; padding: 15px; background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 6px;">
+            <div style="font-weight: 600; margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between;">
+              <span style="font-size: 14px;">🔄 ${env} Environment</span>
+              <div class="loading-spinner" style="width: 16px; height: 16px;"></div>
+            </div>
+            <div style="font-size: 12px; color: #666;">Querying Alexandria logs...</div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `;
+  
+  // Process each environment sequentially to avoid overwhelming the API
+  for (const environment of environments) {
+    try {
+      console.log(`[COMPREHENSIVE] Processing ${environment} environment`);
+      
+      // Update status for current environment
+      const envResult = document.getElementById(`result-${environment.toLowerCase()}`);
+      if (envResult) {
+        envResult.innerHTML = `
+          <div style="font-weight: 600; margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between;">
+            <span style="font-size: 14px;">⚡ ${environment} Environment</span>
+            <div class="loading-spinner" style="width: 16px; height: 16px;"></div>
+          </div>
+          <div style="font-size: 12px; color: #666;">Analyzing logs with Alexandria AI...</div>
+        `;
+      }
+      
+      // Get environment-specific analysis
+      const envData = await analyzeEnvironmentLogs(environment);
+      results[environment] = envData;
+      
+      // Update with results
+      displayEnvironmentResult(environment, envData);
+      
+    } catch (error) {
+      console.error(`[COMPREHENSIVE] Error analyzing ${environment}:`, error);
+      results[environment] = { error: error.message };
+      displayEnvironmentResult(environment, { error: error.message });
+    }
+  }
+  
+  // Add final summary and actions
+  addComprehensiveSummary(results);
+}
+
+// Function to analyze logs for a specific environment
+async function analyzeEnvironmentLogs(environment) {
+  const envData = window.environmentSearchStrings;
+  const environmentKeyMap = {
+    'HQ': 'hq',
+    'Kamino': 'kamino',
+    'LightBridge': 'lightbridge',
+    'Ardent': 'ardent'
+  };
+  
+  const envKey = environmentKeyMap[environment];
+  if (!envKey || !envData.searchStrings[envKey]) {
+    throw new Error(`No search configuration found for ${environment} environment`);
+  }
+  
+  const timeFilter = window.customTimeFilter || '-8h';
+  let searchString = envData.searchStrings[envKey];
+  
+  // Apply custom time filter if set
+  if (window.customTimeFilter && window.customTimeFilter !== '-8h') {
+    if (envKey === 'hq' || envKey === 'kamino') {
+      const timeFilter = calculateTimeFromFilter(window.customTimeFilter);
+      searchString = searchString.replace(/-8h/g, window.customTimeFilter);
+    } else {
+      searchString = searchString.replace(/last 8 hours/gi, `last ${window.customTimeFilter.replace('-', '').replace('h', ' hours').replace('m', ' minutes').replace('d', ' days')}`);
+    }
+  }
+  
+  console.log(`[ENV_ANALYSIS] Querying ${environment} with: ${searchString}`);
+  
+  // Query Alexandria logs
+  const logResults = await queryAlexandriaLogs(authToken, searchString);
+  
+  if (!logResults || !logResults.Data || logResults.Data.length === 0) {
+    return {
+      environment,
+      logCount: 0,
+      searchString,
+      analysis: `No logs found for ${environment} environment in the specified time range.`,
+      logs: []
+    };
+  }
+  
+  // Prepare data for AI analysis
+  const selectedLogs = selectLogsForAnalysis(logResults.Data);
+  let logSummary = `Found ${logResults.Data.length} log entries from ${environment} environment. Selected ${selectedLogs.length} key logs for analysis:\n\n`;
+  
+  // Format logs for AI analysis (same as existing logic)
+  const logsBySource = {
+    first: selectedLogs.filter(log => log.source === 'first'),
+    last: selectedLogs.filter(log => log.source === 'last'),
+    error: selectedLogs.filter(log => log.source === 'error'),
+    context: selectedLogs.filter(log => log.source === 'context')
+  };
+  
+  // Build formatted log summary
+  if (logsBySource.first.length > 0) {
+    logSummary += `=== FIRST ${logsBySource.first.length} LOGS (Session Start) ===\n`;
+    logsBySource.first.forEach((log, index) => {
+      logSummary += `Log ${index + 1}:\nTimestamp: ${log.timestamp || 'N/A'}\nLevel: ${log.level || log.logLevel || 'N/A'}\nMessage: ${log.message || log._raw || JSON.stringify(log).substring(0, 300)}\n---\n`;
+    });
+    logSummary += `\n`;
+  }
+  
+  if (logsBySource.error.length > 0) {
+    logSummary += `=== ERROR LOGS (${logsBySource.error.length} found) ===\n`;
+    logsBySource.error.forEach((log, index) => {
+      logSummary += `Error ${index + 1}:\nTimestamp: ${log.timestamp || 'N/A'}\nLevel: ${log.level || log.logLevel || 'ERROR'}\nMessage: ${log.message || log._raw || JSON.stringify(log).substring(0, 300)}\n---\n`;
+    });
+    logSummary += `\n`;
+  }
+  
+  if (logsBySource.context.length > 0) {
+    logSummary += `=== CONTEXT LOGS (${logsBySource.context.length} request/response logs around errors) ===\n`;
+    logsBySource.context.forEach((log, index) => {
+      logSummary += `Context ${index + 1}:\nTimestamp: ${log.timestamp || 'N/A'}\nLevel: ${log.level || log.logLevel || 'N/A'}\nMessage: ${log.message || log._raw || JSON.stringify(log).substring(0, 300)}\n---\n`;
+    });
+    logSummary += `\n`;
+  }
+  
+  if (logsBySource.last.length > 0) {
+    logSummary += `=== LAST ${logsBySource.last.length} LOGS (Recent Activity) ===\n`;
+    logsBySource.last.forEach((log, index) => {
+      logSummary += `Recent ${index + 1}:\nTimestamp: ${log.timestamp || 'N/A'}\nLevel: ${log.level || log.logLevel || 'N/A'}\nMessage: ${log.message || log._raw || JSON.stringify(log).substring(0, 300)}\n---\n`;
+    });
+  }
+  
+  // Send to Alexandria AI for analysis
+  const summaryPrompt = `Analyze these ${environment} environment log entries and provide insights:
+
+${logSummary}
+
+Focus on:
+1. Any errors or issues found
+2. Performance patterns
+3. Key events or transactions
+4. Recommendations for optimization
+5. Environment-specific insights`;
+
+  const alexandriaAnalysis = await summarizeLogsAPI(summaryPrompt);
+  
+  return {
+    environment,
+    logCount: logResults.Data.length,
+    selectedLogCount: selectedLogs.length,
+    searchString,
+    analysis: alexandriaAnalysis?.summary || alexandriaAnalysis?.response || 'Analysis completed',
+    rawData: logResults,
+    timestamp: new Date().toISOString()
+  };
+}
+
+// Function to display results for a specific environment
+function displayEnvironmentResult(environment, envData) {
+  const envResult = document.getElementById(`result-${environment.toLowerCase()}`);
+  if (!envResult) return;
+  
+  const envKey = environment.toLowerCase();
+  
+  if (envData.error) {
+    envResult.innerHTML = `
+      <div style="background: #f8d7da; border: 1px solid #f5c6cb; border-radius: 6px; padding: 15px;">
+        <div style="font-weight: 600; margin-bottom: 10px; color: #721c24;">
+          ❌ ${environment} Environment - Analysis Failed
+        </div>
+        <div style="margin-bottom: 10px; font-size: 13px;">
+          <strong>Error:</strong> ${envData.error}
+        </div>
+        <button onclick="window.summarizeEnvironmentLogs('${environment}')" style="padding: 6px 12px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">
+          🔄 Retry ${environment}
+        </button>
+      </div>
+    `;
+    return;
+  }
+  
+  envResult.innerHTML = `
+    <div style="background: #d4edda; border: 1px solid #c3e6cb; border-radius: 6px; padding: 15px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+        <div style="font-weight: 600; color: #155724; font-size: 14px;">
+          ✅ ${environment} Environment Analysis
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <button id="download-${envKey}-logs" style="padding: 4px 8px; background: #17a2b8; color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 11px;">
+            📥 Download
+          </button>
+          <button onclick="window.toggleEnvironmentDetails('${envKey}')" style="padding: 4px 8px; background: #6c757d; color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 11px;">
+            📋 Details
+          </button>
+        </div>
+      </div>
+      
+      <div style="margin-bottom: 10px; font-size: 12px; color: #155724;">
+        <strong>Found:</strong> ${envData.logCount?.toLocaleString() || 0} total logs • 
+        <strong>Analyzed:</strong> ${envData.selectedLogCount || 0} key logs • 
+        <strong>Generated:</strong> ${new Date(envData.timestamp).toLocaleTimeString()}
+      </div>
+      
+      <div id="summary-${envKey}" class="environment-summary" style="cursor: pointer; padding: 10px; background: #f8f9fa; border-radius: 4px; border-left: 4px solid #28a745;" onclick="window.toggleEnvironmentSummary('${envKey}')">
+        <div style="font-weight: 600; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
+          <span>🔍 AI Analysis Summary</span>
+          <span id="toggle-${envKey}" style="font-size: 12px;">▼ Click to expand</span>
+        </div>
+        <div id="analysis-${envKey}" style="display: none; white-space: pre-wrap; line-height: 1.4; font-size: 12px; margin-top: 10px; color: #495057;">
+${envData.analysis}
+        </div>
+      </div>
+    </div>
+  `;
+  
+  // Store environment data globally for download
+  window[`${envKey}EnvironmentData`] = envData;
+  
+  // Add event listeners with a slight delay to ensure DOM is ready
+  setTimeout(() => {
+    // Add download event listener
+    const downloadBtn = document.getElementById(`download-${envKey}-logs`);
+    if (downloadBtn) {
+      downloadBtn.addEventListener('click', () => window.downloadEnvironmentLogs(environment, envData));
+      console.log(`[EVENT] Added download listener for ${envKey}`);
+    }
+    
+    // Add toggle event listener for the summary section
+    const summaryDiv = document.getElementById(`summary-${envKey}`);
+    if (summaryDiv) {
+      summaryDiv.addEventListener('click', () => {
+        console.log(`[EVENT] Summary div clicked for ${envKey}`);
+        window.toggleEnvironmentSummary(envKey);
+      });
+      console.log(`[EVENT] Added toggle listener for ${envKey}`);
+    }
+    
+    // Add event listener for details button
+    const detailsBtn = document.querySelector(`button[onclick*="toggleEnvironmentDetails('${envKey}')"]`);
+    if (detailsBtn) {
+      detailsBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        console.log(`[EVENT] Details button clicked for ${envKey}`);
+        window.toggleEnvironmentDetails(envKey);
+      });
+      console.log(`[EVENT] Added details listener for ${envKey}`);
+    }
+  }, 100);
+}
+
+// Debug function to check if global functions are accessible
+window.debugGlobalFunctions = function() {
+  const functions = [
+    'toggleEnvironmentSummary',
+    'toggleEnvironmentDetails', 
+    'downloadEnvironmentLogs',
+    'copyEnvironmentQuery',
+    'downloadAllEnvironmentLogs',
+    'copyComprehensiveResults',
+    'summarizeEnvironmentLogs'
+  ];
+  
+  console.log('[DEBUG] Checking global function accessibility:');
+  functions.forEach(funcName => {
+    const exists = typeof window[funcName] === 'function';
+    console.log(`[DEBUG] window.${funcName}: ${exists ? '✅ Available' : '❌ Missing'}`);
+  });
+  
+  // Also check if comprehensive results exist
+  console.log('[DEBUG] window.comprehensiveResults:', typeof window.comprehensiveResults, window.comprehensiveResults ? 'Available' : 'Missing');
+  
+  // Test the toggle function directly
+  console.log('[DEBUG] Testing toggle function directly...');
+  
+  // Find any environment key that exists
+  const allElements = document.querySelectorAll('[id*="analysis-"]');
+  if (allElements.length > 0) {
+    const firstElement = allElements[0];
+    const envKey = firstElement.id.replace('analysis-', '');
+    console.log('[DEBUG] Found environment key for testing:', envKey);
+    console.log('[DEBUG] Calling toggleEnvironmentSummary with key:', envKey);
+    window.toggleEnvironmentSummary(envKey);
+  } else {
+    console.log('[DEBUG] No analysis elements found - make sure you have run the comprehensive analysis first');
+  }
+  
+  // Test download function
+  console.log('[DEBUG] Testing download functions...');
+  console.log('[DEBUG] Comprehensive results available:', !!window.comprehensiveResults);
+  if (window.comprehensiveResults) {
+    console.log('[DEBUG] Environments in results:', Object.keys(window.comprehensiveResults));
+  }
+  
+  // Find download buttons
+  const downloadAllBtn = document.querySelector('button[onclick="window.downloadAllEnvironmentLogs()"]');
+  console.log('[DEBUG] Download All Logs button found:', !!downloadAllBtn);
+  
+  const copyAllBtn = document.querySelector('button[onclick="window.copyComprehensiveResults()"]');
+  console.log('[DEBUG] Copy All Results button found:', !!copyAllBtn);
+};
+
+// Test function specifically for download functionality
+window.testDownloadFunction = function() {
+  console.log('[TEST] === TESTING DOWNLOAD ALL LOGS FUNCTION ===');
+  
+  // Check if the function exists
+  if (typeof window.downloadAllEnvironmentLogs !== 'function') {
+    console.error('[TEST] downloadAllEnvironmentLogs function not found!');
+    return;
+  }
+  
+  // Check if we have comprehensive results
+  if (!window.comprehensiveResults) {
+    console.error('[TEST] No comprehensive results available. Run analysis first.');
+    return;
+  }
+  
+  console.log('[TEST] Comprehensive results found:', Object.keys(window.comprehensiveResults));
+  
+  // Check what environments have successful results
+  const successfulEnvs = Object.keys(window.comprehensiveResults).filter(env => !window.comprehensiveResults[env].error);
+  console.log('[TEST] Successful environments:', successfulEnvs);
+  
+  if (successfulEnvs.length === 0) {
+    console.error('[TEST] No successful environment results to download');
+    return;
+  }
+  
+  // Try calling the function
+  console.log('[TEST] Calling downloadAllEnvironmentLogs...');
+  try {
+    window.downloadAllEnvironmentLogs();
+    console.log('[TEST] Function called successfully');
+  } catch (error) {
+    console.error('[TEST] Error calling download function:', error);
+  }
+};
+
+// Function to toggle environment summary visibility
+window.toggleEnvironmentSummary = function(envKey) {
+  console.log('[TOGGLE] === DEBUGGING TOGGLE FUNCTION ===');
+  console.log('[TOGGLE] Toggling environment summary for envKey:', envKey);
+  console.log('[TOGGLE] Looking for elements with IDs:');
+  console.log('[TOGGLE] - analysis-' + envKey);
+  console.log('[TOGGLE] - toggle-' + envKey);
+  
+  const analysisDiv = document.getElementById(`analysis-${envKey}`);
+  const toggleSpan = document.getElementById(`toggle-${envKey}`);
+  
+  console.log('[TOGGLE] Found analysisDiv:', analysisDiv);
+  console.log('[TOGGLE] Found toggleSpan:', toggleSpan);
+  
+  if (analysisDiv && toggleSpan) {
+    console.log('[TOGGLE] Current display style:', analysisDiv.style.display);
+    
+    if (analysisDiv.style.display === 'none' || analysisDiv.style.display === '') {
+      analysisDiv.style.display = 'block';
+      toggleSpan.textContent = '▲ Click to collapse';
+      console.log('[TOGGLE] Changed to: EXPANDED');
+    } else {
+      analysisDiv.style.display = 'none';
+      toggleSpan.textContent = '▼ Click to expand';
+      console.log('[TOGGLE] Changed to: COLLAPSED');
+    }
+  } else {
+    console.error('[TOGGLE] Could not find elements for envKey:', envKey);
+    console.error('[TOGGLE] Available elements with IDs containing "analysis":');
+    
+    // Debug: List all elements with IDs containing our search terms
+    const allElements = document.querySelectorAll('[id*="analysis"]');
+    allElements.forEach(el => console.log('[TOGGLE] Found element:', el.id, el));
+    
+    const allToggleElements = document.querySelectorAll('[id*="toggle"]');
+    allToggleElements.forEach(el => console.log('[TOGGLE] Found toggle element:', el.id, el));
+  }
+};
+
+// Function to toggle environment details (raw data)
+window.toggleEnvironmentDetails = function(envKey) {
+  console.log('[DETAILS] Toggling environment details for:', envKey);
+  const envData = window[`${envKey}EnvironmentData`];
+  if (!envData) {
+    console.error('[DETAILS] No environment data found for:', envKey);
+    return;
+  }
+  
+  const existingDetails = document.getElementById(`details-${envKey}`);
+  if (existingDetails) {
+    existingDetails.remove();
+    return;
+  }
+  
+  const envResult = document.getElementById(`result-${envKey}`);
+  if (!envResult) {
+    console.error('[DETAILS] Could not find result container for:', envKey);
+    return;
+  }
+  
+  const detailsDiv = document.createElement('div');
+  detailsDiv.id = `details-${envKey}`;
+  detailsDiv.innerHTML = `
+    <div style="margin-top: 15px; padding: 10px; background: #f1f1f1; border-radius: 4px; border: 1px solid #ddd;">
+      <div style="font-weight: 600; margin-bottom: 10px; font-size: 12px;">🔧 Technical Details:</div>
+      <div style="margin-bottom: 8px; font-size: 11px;">
+        <strong>Search Query:</strong><br>
+        <code style="font-size: 10px; word-break: break-all; background: #fff; padding: 4px; border-radius: 2px; display: block; margin-top: 4px;">${envData.searchString}</code>
+      </div>
+      <div style="margin-bottom: 8px; font-size: 11px;">
+        <strong>Time Range:</strong> ${window.customTimeFilter || '-8h (default)'}
+      </div>
+      <div style="font-size: 11px;">
+        <strong>Analysis ID:</strong> ${envData.timestamp}
+      </div>
+      <div style="margin-top: 10px;">
+        <button onclick="window.copyEnvironmentQuery('${envKey}')" style="padding: 4px 8px; background: #28a745; color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 10px;">
+          📋 Copy Query
+        </button>
+        <button onclick="document.getElementById('details-${envKey}').remove()" style="padding: 4px 8px; background: #6c757d; color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 10px; margin-left: 8px;">
+          ✖ Close
+        </button>
+      </div>
+    </div>
+  `;
+  
+  envResult.appendChild(detailsDiv);
+};
+
+// Function to download logs for a specific environment
+window.downloadEnvironmentLogs = function(environment, envData) {
+  console.log('[DOWNLOAD_ENV] Downloading logs for environment:', environment);
+  if (!envData || !envData.rawData) {
+    console.error('[DOWNLOAD_ENV] No raw data available for:', environment);
+    alert(`No log data available for ${environment} environment.`);
+    return;
+  }
+  
+  const logEntries = envData.rawData.Data || [];
+  if (logEntries.length === 0) {
+    alert(`No log entries found for ${environment} environment.`);
+    return;
+  }
+  
+  try {
+    // Convert to .log format
+    let logContent = `# ${environment} Environment Log Export\n`;
+    logContent += `# Export Date: ${new Date().toISOString()}\n`;
+    logContent += `# Total Entries: ${logEntries.length}\n`;
+    logContent += `# Analysis Timestamp: ${envData.timestamp}\n`;
+    logContent += `# Source: EasyLogs Extension v3.0.0\n`;
+    logContent += `#\n`;
+    
+    // Process each log entry
+    logEntries.forEach((entry) => {
+      if (typeof entry === 'object') {
+        const timestamp = entry.timestamp || entry.Timestamp || entry['@timestamp'] || '';
+        const message = entry.message || entry.Message || '';
+        const level = entry.level || entry.Level || entry.severity || '';
+        
+        if (message) {
+          logContent += `${timestamp} [${level}] ${message}\n`;
+        } else {
+          logContent += `${JSON.stringify(entry)}\n`;
+        }
+      } else {
+        logContent += `${String(entry)}\n`;
+      }
+    });
+    
+    // Create and download file
+    const blob = new Blob([logContent], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${environment.toLowerCase()}_logs_${new Date().toISOString().replace(/[:.]/g, '-')}.log`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    
+    console.log(`[DOWNLOAD] Downloaded ${logEntries.length} log entries for ${environment}`);
+  } catch (error) {
+    console.error(`[DOWNLOAD] Error downloading ${environment} logs:`, error);
+    alert(`Error downloading ${environment} logs: ${error.message}`);
+  }
+}
+
+// Function to copy environment query to clipboard
+window.copyEnvironmentQuery = function(envKey) {
+  console.log('[COPY_QUERY] Copying query for environment:', envKey);
+  const envData = window[`${envKey}EnvironmentData`];
+  if (!envData) {
+    console.error('[COPY_QUERY] No environment data found for:', envKey);
+    alert(`No data available for ${envKey.toUpperCase()} environment.`);
+    return;
+  }
+  
+  navigator.clipboard.writeText(envData.searchString).then(() => {
+    console.log('[COPY_QUERY] Successfully copied query to clipboard');
+    alert(`✅ ${envKey.toUpperCase()} search query copied to clipboard!`);
+  }).catch((error) => {
+    console.error('[COPY_QUERY] Clipboard API failed, using fallback:', error);
+    // Fallback
+    const textArea = document.createElement('textarea');
+    textArea.value = envData.searchString;
+    document.body.appendChild(textArea);
+    textArea.select();
+    document.execCommand('copy');
+    document.body.removeChild(textArea);
+    alert(`✅ ${envKey.toUpperCase()} search query copied to clipboard!`);
+  });
+};
+
+// Function to add comprehensive summary at the end
+function addComprehensiveSummary(results) {
+  const environmentResults = document.getElementById('environment-results');
+  if (!environmentResults) return;
+  
+  const successfulAnalyses = Object.keys(results).filter(env => !results[env].error);
+  const failedAnalyses = Object.keys(results).filter(env => results[env].error);
+  const totalLogs = successfulAnalyses.reduce((sum, env) => sum + (results[env].logCount || 0), 0);
+  
+  environmentResults.insertAdjacentHTML('beforeend', `
+    <div style="margin-top: 30px; padding: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border-radius: 8px;">
+      <div style="font-weight: 600; margin-bottom: 15px; font-size: 16px;">
+        📊 Comprehensive Analysis Summary
+      </div>
+      
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px;">
+        <div style="text-align: center; padding: 10px; background: rgba(255,255,255,0.1); border-radius: 6px;">
+          <div style="font-size: 24px; font-weight: 600;">${successfulAnalyses.length}</div>
+          <div style="font-size: 12px;">Environments Analyzed</div>
+        </div>
+        <div style="text-align: center; padding: 10px; background: rgba(255,255,255,0.1); border-radius: 6px;">
+          <div style="font-size: 24px; font-weight: 600;">${totalLogs.toLocaleString()}</div>
+          <div style="font-size: 12px;">Total Log Entries</div>
+        </div>
+        <div style="text-align: center; padding: 10px; background: rgba(255,255,255,0.1); border-radius: 6px;">
+          <div style="font-size: 24px; font-weight: 600;">${failedAnalyses.length}</div>
+          <div style="font-size: 12px;">Failures</div>
+        </div>
+        <div style="text-align: center; padding: 10px; background: rgba(255,255,255,0.1); border-radius: 6px;">
+          <div style="font-size: 24px; font-weight: 600;">${new Date().toLocaleTimeString()}</div>
+          <div style="font-size: 12px;">Completed At</div>
+        </div>
+      </div>
+      
+      <div style="display: flex; gap: 10px; flex-wrap: wrap; justify-content: center;">
+        <button onclick="window.downloadAllEnvironmentLogs()" style="padding: 10px 20px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">
+          📥 Download All Logs
+        </button>
+        <button onclick="window.copyComprehensiveResults()" style="padding: 10px 20px; background: #17a2b8; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">
+          📋 Copy All Results
+        </button>
+        <button onclick="summarizeLogs()" style="padding: 10px 20px; background: #ffc107; color: #212529; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">
+          🔄 Refresh Analysis
+        </button>
+      </div>
+    </div>
+  `);
+  
+  // Store comprehensive results globally
+  window.comprehensiveResults = results;
+  
+  // Add event listeners for the comprehensive summary buttons
+  setTimeout(() => {
+    // Add event listener for Download All Logs button
+    const downloadAllBtn = document.querySelector('button[onclick="window.downloadAllEnvironmentLogs()"]');
+    if (downloadAllBtn) {
+      downloadAllBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        console.log('[EVENT] Download All Logs button clicked');
+        window.downloadAllEnvironmentLogs();
+      });
+      console.log('[EVENT] Added Download All Logs event listener');
+    } else {
+      console.error('[EVENT] Could not find Download All Logs button');
+    }
+    
+    // Add event listener for Copy All Results button  
+    const copyAllBtn = document.querySelector('button[onclick="window.copyComprehensiveResults()"]');
+    if (copyAllBtn) {
+      copyAllBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        console.log('[EVENT] Copy All Results button clicked');
+        window.copyComprehensiveResults();
+      });
+      console.log('[EVENT] Added Copy All Results event listener');
+    } else {
+      console.error('[EVENT] Could not find Copy All Results button');
+    }
+    
+    // Add event listener for Refresh Analysis button
+    const refreshBtn = document.querySelector('button[onclick="summarizeLogs()"]');
+    if (refreshBtn) {
+      refreshBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        console.log('[EVENT] Refresh Analysis button clicked');
+        summarizeLogs();
+      });
+      console.log('[EVENT] Added Refresh Analysis event listener');
+    } else {
+      console.error('[EVENT] Could not find Refresh Analysis button');
+    }
+  }, 200);
+}
+
+// Function to download all environment logs
+window.downloadAllEnvironmentLogs = function() {
+  console.log('[DOWNLOAD] Starting download of all environment logs...');
+  const results = window.comprehensiveResults;
+  if (!results) {
+    console.error('[DOWNLOAD] No comprehensive results available');
+    alert('No comprehensive analysis results available. Please run analysis first.');
+    return;
+  }
+  
+  const environments = Object.keys(results).filter(env => !results[env].error);
+  console.log('[DOWNLOAD] Found environments to download:', environments);
+  
+  if (environments.length === 0) {
+    alert('No successful environment analyses found to download.');
+    return;
+  }
+  
+  environments.forEach((env, index) => {
+    const envData = results[env];
+    if (envData.rawData) {
+      setTimeout(() => {
+        console.log(`[DOWNLOAD] Downloading logs for ${env}...`);
+        downloadEnvironmentLogs(env, envData);
+      }, 500 * index);
+    }
+  });
+  
+  alert(`📥 Starting download of logs from ${environments.length} environments...`);
+};
+
+// Function to copy all comprehensive results
+window.copyComprehensiveResults = function() {
+  console.log('[COPY] Copying comprehensive analysis results...');
+  const results = window.comprehensiveResults;
+  if (!results) {
+    console.error('[COPY] No comprehensive results available');
+    alert('No comprehensive analysis results available. Please run analysis first.');
+    return;
+  }
+  
+  let text = `Comprehensive Log Analysis Results\n`;
+  text += `Generated: ${new Date().toISOString()}\n`;
+  text += `Time Range: ${window.customTimeFilter || '-8h (default)'}\n\n`;
+  
+  Object.keys(results).forEach(env => {
+    const data = results[env];
+    text += `=== ${env.toUpperCase()} ENVIRONMENT ===\n`;
+    if (data.error) {
+      text += `Status: Failed - ${data.error}\n\n`;
+    } else {
+      text += `Status: Success\n`;
+      text += `Log Count: ${data.logCount || 0}\n`;
+      text += `Analysis:\n${data.analysis}\n\n`;
+    }
+  });
+  
+  navigator.clipboard.writeText(text).then(() => {
+    console.log('[COPY] Successfully copied to clipboard');
+    alert('✅ Comprehensive analysis results copied to clipboard!');
+  }).catch((error) => {
+    console.error('[COPY] Clipboard API failed, using fallback:', error);
+    // Fallback
+    const textArea = document.createElement('textarea');
+    textArea.value = text;
+    document.body.appendChild(textArea);
+    textArea.select();
+    document.execCommand('copy');
+    document.body.removeChild(textArea);
+    alert('✅ Comprehensive analysis results copied to clipboard!');
+  });
+};
+
+// New function to handle Alexandria log query and analysis
+async function proceedWithAlexandriaLogQuery() {
+  const logSummariesContent = document.getElementById('log-summaries-content');
+  
+  try {
+    // Step 0: Check for cached authentication token first
+    console.log('🔐 [ALEXANDRIA] Checking authentication status...');
+    if (!authToken) {
+      console.log('🔄 [ALEXANDRIA] No token in memory, checking cache...');
+      authToken = await initializeAuthToken();
+    }
+    
+    if (!authToken) {
+      throw new Error('No authentication token available. Please log in first to cache your token for 8 hours.');
+    }
+    
+    console.log('✅ [ALEXANDRIA] Authentication token available');
+    const tokenStr = String(authToken);
+    console.log('🔑 [ALEXANDRIA] Using token:', tokenStr.substring(0, 12) + '...' + tokenStr.substring(tokenStr.length - 8));
+    
+    // Step 1: Get queries from existing session data (same as Networks tab)
+    const sessionQueries = extractQueryFromSession();
+    
+    if (!sessionQueries) {
+      throw new Error('No session data available to build query. Please ensure you have active network requests.');
+    }
+    
+    // Step 2: Determine which query to use based on domain context
+    const sessionData = getSessionData();
+    const allRequests = sessionData.requests || [];
+    const activeDomain = sessionData.activeDomain;
+    
+    // Debug: Log session data being used for queries
+    console.log('[ALEXANDRIA] Session data for queries:', {
+      sessionId: sessionData.sessionId,
+      workstationId: sessionData.workstationId,
+      activeDomain: activeDomain,
+      requestCount: allRequests.length,
+      sessionDataKeys: Object.keys(sessionData),
+      hasValidSessionId: !!(sessionData.sessionId && sessionData.sessionId !== 'NO_SESSION'),
+      hasValidWorkstationId: !!(sessionData.workstationId && sessionData.workstationId !== 'N/A')
+    });
+    
+    // Detect the most appropriate query based on domain patterns
+    let selectedQueries = [];
+    let queryType;
+    
+    // Check if we have valid session data to inform query strategy
+    const hasValidSession = sessionData.sessionId && sessionData.sessionId !== 'NO_SESSION';
+    const hasValidWorkstation = sessionData.workstationId && sessionData.workstationId !== 'N/A';
+    
+    console.log('[ALEXANDRIA] Session validity check:', {
+      hasValidSession,
+      hasValidWorkstation,
+      willUseSessionQueries: hasValidSession || hasValidWorkstation
+    });
+    
+    // Use your exact working PowerShell query first, then try simple fallbacks
+    selectedQueries = [
+      { query: sessionQueries.working, type: 'working', description: 'Your exact working PowerShell query' },
+      { query: sessionQueries.prod_simple, type: 'prod_simple', description: 'Production HQ logs (-8h, no session filter)' },
+      { query: sessionQueries.prod_any, type: 'prod_any', description: 'Any production HQ logs (100 entries)' }
+    ];
+    queryType = 'working_example';
+    
+    console.log('📝 [ALEXANDRIA] ========== QUERY SELECTION ==========');
+    console.log('🎯 [ALEXANDRIA] Selected query strategy:', queryType);
+    console.log('📋 [ALEXANDRIA] Query options available:', selectedQueries.length);
+    
+    selectedQueries.forEach((queryOption, index) => {
+      console.log(`📄 [ALEXANDRIA] Query ${index + 1}:`);
+      console.log(`   Type: ${queryOption.type}`);
+      console.log(`   Description: ${queryOption.description}`);
+      console.log(`   Query length: ${queryOption.query?.length || 0} characters`);
+      console.log(`   Query content: ${queryOption.query}`);
+    });
+    
+    console.log('🔐 [ALEXANDRIA] Auth token analysis:');
+    console.log('   Auth token type:', typeof authToken);
+    console.log('   Auth token exists:', !!authToken);
+    if (authToken) {
+      const tokenStr = String(authToken);
+      console.log('   Auth token length:', tokenStr.length);
+      console.log('   Auth token preview:', tokenStr.substring(0, 12) + '...' + tokenStr.substring(tokenStr.length - 8));
+    } else {
+      console.log('   Auth token: null/undefined');
+    }
+    
+    // Step 3: Try queries in order until we get results
+    let logResults = null;
+    let successfulQuery = null;
+    
+    console.log('🔄 [ALEXANDRIA] ========== STARTING QUERY ATTEMPTS ==========');
+    console.log('📊 [ALEXANDRIA] Will attempt', selectedQueries.length, 'queries in order');
+    
+    for (const queryOption of selectedQueries) {
+      try {
+        console.log(`🚀 [ALEXANDRIA] ========== ATTEMPT ${selectedQueries.indexOf(queryOption) + 1}/${selectedQueries.length} ==========`);
+        console.log(`📝 [ALEXANDRIA] Query Type: ${queryOption.type}`);
+        console.log(`📝 [ALEXANDRIA] Description: ${queryOption.description}`);
+        console.log(`📝 [ALEXANDRIA] Query: ${queryOption.query}`);
+        console.log(`⏰ [ALEXANDRIA] Starting at: ${new Date().toISOString()}`);
+        
+        // Update status for current query attempt
+        logSummariesContent.innerHTML = `
+          <div class="ai-loading">
+            <div class="loading-spinner"></div>
+            📡 Querying Alexandria logs using: ${queryOption.description}...
+            <div style="margin-top: 10px; font-size: 12px; color: #666;">
+              Environment: <strong>${queryOption.type.toUpperCase()}</strong><br>
+              Query: ${queryOption.query}<br>
+              Token: ${String(authToken).substring(0, 8)}...<br>
+              Attempt: ${selectedQueries.indexOf(queryOption) + 1} of ${selectedQueries.length}
+            </div>
+          </div>
+        `;
+        
+        console.log(`⚡ [ALEXANDRIA] Calling queryAlexandriaLogs() for attempt ${selectedQueries.indexOf(queryOption) + 1}`);
+        const results = await queryAlexandriaLogs(authToken, queryOption.query);
+        
+        console.log(`📥 [ALEXANDRIA] Query attempt ${selectedQueries.indexOf(queryOption) + 1} completed`);
+        console.log(`📊 [ALEXANDRIA] Results analysis:`, {
+          hasResults: !!results,
+          resultsType: typeof results,
+          hasDataArray: !!(results && results.Data),
+          dataLength: results?.Data?.length || 0,
+          resultKeys: results ? Object.keys(results) : []
+        });
+        
+        if (results && results.Data && results.Data.length > 0) {
+          console.log(`✅ [ALEXANDRIA] SUCCESS! Query ${selectedQueries.indexOf(queryOption) + 1} returned ${results.Data.length} results`);
+          logResults = results;
+          successfulQuery = queryOption;
+          break; // Success! Exit the loop
+        } else {
+          console.log(`⚠️  [ALEXANDRIA] Query ${selectedQueries.indexOf(queryOption) + 1} returned no results, trying next...`);
+        }
+      } catch (error) {
+        console.warn(`❌ [ALEXANDRIA] Query ${selectedQueries.indexOf(queryOption) + 1} failed: ${queryOption.type} - ${error.message}`);
+        console.log(`🔄 [ALEXANDRIA] Continuing to next query attempt...`);
+        // Continue to next query
+      }
+    }
+    
+    if (!logResults || !logResults.Data || logResults.Data.length === 0) {
+      throw new Error(`No logs found with any of the ${selectedQueries.length} queries attempted. Check if the Alexandria indices contain data for your session.`);
+    }
+    
+    console.log('[ALEXANDRIA] Log query results:', logResults);
+    
+    // Step 4: Process the log results and prepare for Alexandria analysis using intelligent selection
+    let logSummary = 'No logs found matching the session criteria.';
+    
+    if (logResults && logResults.Data && logResults.Data.length > 0) {
+      const selectedLogs = selectLogsForAnalysis(logResults.Data);
+      logSummary = `Found ${logResults.Data.length} log entries from Alexandria (using ${successfulQuery.description}). Selected ${selectedLogs.length} key logs for analysis:\n\n`;
+      
+      // Group logs by source for better organization
+      const logsBySource = {
+        first: selectedLogs.filter(log => log.source === 'first'),
+        last: selectedLogs.filter(log => log.source === 'last'),
+        error: selectedLogs.filter(log => log.source === 'error'),
+        context: selectedLogs.filter(log => log.source === 'context')
+      };
+      
+      // Add first logs
+      if (logsBySource.first.length > 0) {
+        logSummary += `=== FIRST ${logsBySource.first.length} LOGS (Session Start) ===\n`;
+        logsBySource.first.forEach((log, index) => {
+          logSummary += `Log ${index + 1}:\n`;
+          logSummary += `Timestamp: ${log.timestamp || 'N/A'}\n`;
+          logSummary += `Level: ${log.level || log.logLevel || 'N/A'}\n`;
+          logSummary += `Message: ${log.message || log._raw || JSON.stringify(log).substring(0, 300)}\n`;
+          logSummary += `---\n`;
+        });
+        logSummary += `\n`;
+      }
+      
+      // Add error logs with context
+      if (logsBySource.error.length > 0) {
+        logSummary += `=== ERROR LOGS (${logsBySource.error.length} found) ===\n`;
+        logsBySource.error.forEach((log, index) => {
+          logSummary += `Error ${index + 1}:\n`;
+          logSummary += `Timestamp: ${log.timestamp || 'N/A'}\n`;
+          logSummary += `Level: ${log.level || log.logLevel || 'ERROR'}\n`;
+          logSummary += `Message: ${log.message || log._raw || JSON.stringify(log).substring(0, 300)}\n`;
+          logSummary += `---\n`;
+        });
+        logSummary += `\n`;
+      }
+      
+      // Add context logs
+      if (logsBySource.context.length > 0) {
+        logSummary += `=== CONTEXT LOGS (${logsBySource.context.length} request/response logs around errors) ===\n`;
+        logsBySource.context.forEach((log, index) => {
+          logSummary += `Context ${index + 1}:\n`;
+          logSummary += `Timestamp: ${log.timestamp || 'N/A'}\n`;
+          logSummary += `Level: ${log.level || log.logLevel || 'N/A'}\n`;
+          logSummary += `Message: ${log.message || log._raw || JSON.stringify(log).substring(0, 300)}\n`;
+          logSummary += `---\n`;
+        });
+        logSummary += `\n`;
+      }
+      
+      // Add last logs
+      if (logsBySource.last.length > 0) {
+        logSummary += `=== LAST ${logsBySource.last.length} LOGS (Recent Activity) ===\n`;
+        logsBySource.last.forEach((log, index) => {
+          logSummary += `Recent ${index + 1}:\n`;
+          logSummary += `Timestamp: ${log.timestamp || 'N/A'}\n`;
+          logSummary += `Level: ${log.level || log.logLevel || 'N/A'}\n`;
+          logSummary += `Message: ${log.message || log._raw || JSON.stringify(log).substring(0, 300)}\n`;
+          logSummary += `---\n`;
+        });
+      }
+      
+      if (logResults.Data.length > selectedLogs.length) {
+        logSummary += `\n... and ${logResults.Data.length - selectedLogs.length} more log entries not shown`;
+      }
+    }
+    
+    // Step 5: Update status for Alexandria analysis
+    logSummariesContent.innerHTML = `
+      <div class="ai-loading">
+        <div class="loading-spinner"></div>
+        📊 Processing ${logResults?.Data?.length || 0} log entries with Alexandria analysis...
+        <div style="margin-top: 8px; font-size: 12px; color: #666;">
+          Successfully queried: ${successfulQuery.description}
+        </div>
+      </div>
+    `;
+    
+    // Step 5: Send to Alexandria for analysis (using the same API)
+    const summaryPrompt = `Analyze these log entries and provide insights:
+
+${logSummary}
+
+Focus on:
+1. Any errors or issues found
+2. Performance patterns
+3. Key events or transactions
+4. Recommendations for optimization`;
+
+    console.log('[ALEXANDRIA] Sending analysis prompt to Alexandria:', summaryPrompt);
+    console.log('[ALEXANDRIA] Prompt length:', summaryPrompt.length);
+    
+    // NEW: Show the exact prompt being sent to Alexandria in the UI
+    displayExactPrompt(summaryPrompt, successfulQuery);
+    
+    try {
+      console.log('[ALEXANDRIA] Calling summarizeLogsAPI with prompt...');
+      const alexandriaResult = await summarizeLogsAPI(summaryPrompt);
+      console.log('[ALEXANDRIA] Analysis result received:', alexandriaResult);
+      console.log('[ALEXANDRIA] Analysis result type:', typeof alexandriaResult);
+      console.log('[ALEXANDRIA] Analysis result keys:', alexandriaResult ? Object.keys(alexandriaResult) : 'null');
+      console.log('[ALEXANDRIA] Analysis summary:', alexandriaResult?.summary);
+      console.log('[ALEXANDRIA] Analysis response:', alexandriaResult?.response);
+      
+      // Step 6: Display final results
+      displayLogSummaryResults(logResults, alexandriaResult, successfulQuery);
+      
+    } catch (alexandriaError) {
+      console.error('[ALEXANDRIA] Alexandria analysis failed:', alexandriaError);
+      
+      // Show log query results even if analysis fails
+      const logSummariesContent = document.getElementById('log-summaries-content');
+      logSummariesContent.innerHTML = `
+        <div style="padding: 20px;">
+          <div style="font-weight: 600; margin-bottom: 15px; font-size: 16px; color: #f39c12;">
+            ⚠️ Partial Analysis Complete
+          </div>
+          
+          <div style="margin-bottom: 20px; padding: 15px; background: #d4edda; border: 1px solid #c3e6cb; border-radius: 6px;">
+            <div style="font-weight: 600; margin-bottom: 10px;">✅ Alexandria Log Query Results:</div>
+            <div style="margin-bottom: 8px;">
+              <strong>Log Entries Found:</strong> ${logResults?.results?.length || 0}
+            </div>
+            <div style="margin-bottom: 8px;">
+              <strong>Successful Query:</strong> ${successfulQuery.description}
+            </div>
+            <div style="margin-bottom: 8px;">
+              <strong>Query Status:</strong> ${logResults?.status || 'Success'}
+            </div>
+            <div style="margin-bottom: 8px;">
+              <strong>Search Duration:</strong> ${logResults?.duration || 'N/A'}
+            </div>
+          </div>
+          
+          <div style="margin-bottom: 20px; padding: 15px; background: #f8d7da; border: 1px solid #f5c6cb; border-radius: 6px;">
+            <div style="font-weight: 600; margin-bottom: 10px;">❌ Alexandria Analysis Failed:</div>
+            <div style="margin-bottom: 10px;">
+              <strong>Error:</strong> ${alexandriaError.message}
+            </div>
+            <div style="margin-bottom: 10px;">
+              <strong>Possible causes:</strong>
+              <ul style="margin: 5px 0; padding-left: 20px;">
+                <li>Alexandria service may be temporarily unavailable</li>
+                <li>Analysis prompt may be too large (${summaryPrompt.length} characters)</li>
+                <li>Authentication token may have expired</li>
+                <li>Service may be experiencing high load</li>
+              </ul>
+            </div>
+            <div style="margin-bottom: 10px;">
+              <strong>You can:</strong>
+              <ul style="margin: 5px 0; padding-left: 20px;">
+                <li>Review the raw Alexandria log data below</li>
+                <li>Try again in a few minutes</li>
+                <li>Use a smaller time range to reduce data size</li>
+                <li>Log in again to refresh your token</li>
+              </ul>
+            </div>
+          </div>
+          
+          <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+            <button onclick="summarizeLogs()" style="padding: 8px 16px; background: #007acc; color: white; border: none; border-radius: 4px; cursor: pointer;">
+              🔄 Try Again
+            </button>
+            <button onclick="resetAuth()" style="padding: 8px 16px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">
+              🔑 Login Again
+            </button>
+            <button onclick="copyAnalysisResults()" style="padding: 8px 16px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer;">
+              📋 Copy Error Info
+            </button>
+          </div>
+        </div>
+      `;
+      
+      // Store partial results
+      window.lastAnalysisResults = {
+        alexandria: logResults,
+        alexandriaAnalysis: null,
+        analysisError: alexandriaError.message,
+        timestamp: new Date().toISOString()
+      };
+      
+      return; // Don't throw the error, just show partial results
+    }
+    
+  } catch (error) {
+    console.error('[ALEXANDRIA] Error in log query process:', error);
+    throw error;
+  }
+}
+
+// Function to display the combined Alexandria + Alexandria Analysis results
+function displayLogSummaryResults(alexandriaResults, alexandriaAnalysis, successfulQuery) {
+  const logSummariesContent = document.getElementById('log-summaries-content');
+  
+  const logCount = alexandriaResults?.Data?.length || 0;
+  const analysisText = alexandriaAnalysis?.summary || alexandriaAnalysis?.response || 'No analysis available';
+  
+  logSummariesContent.innerHTML = `
+    <div style="padding: 10px 20px 20px 20px;">
+      <div style="font-weight: 600; margin-bottom: 15px; font-size: 16px; color: #28a745;">
+        ✅ Alexandria Log Analysis Complete
+      </div>
+      
+      <div style="margin-bottom: 20px; padding: 15px; background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 6px;">
+        <div style="font-weight: 600; margin-bottom: 10px;">📊 Download Logs:</div>
+        <button id="download-alexandria-logs" style="padding: 10px 20px; background: #17a2b8; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: 600;">
+          📥 Download Logs
+        </button>
+        <div style="margin-top: 10px; font-size: 12px; color: #6c757d;">
+          Downloads the received log data as a .log file
+        </div>
+      </div>
+      
+      <div style="margin-bottom: 20px; padding: 15px; background: #e3f2fd; border: 1px solid #bbdefb; border-radius: 6px;">
+        <div style="font-weight: 600; margin-bottom: 10px;">🔍 Alexandria Analysis:</div>
+        <div style="white-space: pre-wrap; line-height: 1.5; font-size: 13px;">
+${analysisText}
+        </div>
+      </div>
+      
+      <div style="display: flex; gap: 10px; margin-top: 15px;">
+        <button onclick="summarizeLogs()" style="padding: 8px 16px; background: #007acc; color: white; border: none; border-radius: 4px; cursor: pointer;">
+          🔄 Analyze Again
+        </button>
+        <button onclick="copyAnalysisResults()" style="padding: 8px 16px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer;">
+          📋 Copy Results
+        </button>
+      </div>
+    </div>
+  `;
+  
+  // Store results globally for copy/export functions
+  window.lastAnalysisResults = {
+    alexandria: alexandriaResults,
+    alexandriaAnalysis: alexandriaAnalysis,
+    timestamp: new Date().toISOString()
+  };
+  
+  // Add event listener for download button
+  setTimeout(() => {
+    const downloadBtn = document.getElementById('download-alexandria-logs');
+    if (downloadBtn) {
+      downloadBtn.addEventListener('click', function() {
+        console.log('[DOWNLOAD] Event listener triggered');
+        downloadAlexandriaLogs();
+      });
+      console.log('[DOWNLOAD] Event listener attached to download button');
+    } else {
+      console.warn('[DOWNLOAD] Download button not found');
+    }
+  }, 100);
+}
+
+// Helper functions for the results display
+function downloadAlexandriaLogs() {
+  console.log('[DOWNLOAD] Download button clicked');
+  console.log('[DOWNLOAD] Checking window.lastAnalysisResults:', window.lastAnalysisResults);
+  
+  if (window.lastAnalysisResults && window.lastAnalysisResults.alexandria) {
+    const logData = window.lastAnalysisResults.alexandria;
+    console.log('[DOWNLOAD] Alexandria data found:', logData);
+    
+    const logEntries = logData.Data || logData.results || [];
+    
+    if (logEntries.length === 0) {
+      alert('No log entries found to download.');
+      return;
+    }
+    
+    console.log('[DOWNLOAD] Processing log entries:', logEntries.length);
+    
+    try {
+      // Convert log entries to .log format (plain text, one entry per line)
+      let logContent = '';
+      
+      // Add header with metadata
+      logContent += `# Alexandria Log Export\n`;
+      logContent += `# Export Date: ${new Date().toISOString()}\n`;
+      logContent += `# Total Entries: ${logEntries.length}\n`;
+      logContent += `# Source: EasyLogs Extension v3.0.0\n`;
+      logContent += `#\n`;
+      
+      // Process each log entry
+      logEntries.forEach((entry, index) => {
+        if (typeof entry === 'string') {
+          // If entry is already a string, use it directly
+          logContent += `${entry}\n`;
+        } else if (typeof entry === 'object') {
+          // If entry is an object, convert to readable format
+          if (entry.message || entry.Message) {
+            // Use the message field if available
+            const timestamp = entry.timestamp || entry.Timestamp || entry['@timestamp'] || '';
+            const message = entry.message || entry.Message || '';
+            const level = entry.level || entry.Level || entry.severity || '';
+            
+            logContent += `${timestamp} [${level}] ${message}\n`;
+          } else {
+            // Convert entire object to JSON string for this line
+            logContent += `${JSON.stringify(entry)}\n`;
+          }
+        } else {
+          // For any other type, convert to string
+          logContent += `${String(entry)}\n`;
+        }
+      });
+      
+      console.log('[DOWNLOAD] Log content prepared, length:', logContent.length);
+      
+      // Create blob and download as .log file
+      const blob = new Blob([logContent], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      
+      // Create download link
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `alexandria_logs_${new Date().toISOString().split('T')[0]}_${Date.now()}.log`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      
+      // Clean up the URL object
+      URL.revokeObjectURL(url);
+      
+      console.log('[DOWNLOAD] Alexandria logs downloaded successfully as .log file');
+      alert('Download started! Check your Downloads folder for the .log file.');
+    } catch (error) {
+      console.error('[DOWNLOAD] Error during download:', error);
+      alert(`Download failed: ${error.message}`);
+    }
+  } else {
+    console.log('[DOWNLOAD] No data available');
+    console.log('[DOWNLOAD] window.lastAnalysisResults:', window.lastAnalysisResults);
+    alert('No Alexandria log data available to download. Please run a log query first.');
+  }
+}
+
+// Make the function globally accessible
+window.downloadAlexandriaLogs = downloadAlexandriaLogs;
+
+function copyAnalysisResults() {
+  if (window.lastAnalysisResults) {
+    const text = `Alexandria Log Analysis Results (${window.lastAnalysisResults.timestamp})
+
+Alexandria Query Results:
+- Log Entries: ${window.lastAnalysisResults.alexandria?.results?.length || 0}
+- Status: ${window.lastAnalysisResults.alexandria?.status || 'N/A'}
+- Duration: ${window.lastAnalysisResults.alexandria?.duration || 'N/A'}
+
+Alexandria Analysis:
+${window.lastAnalysisResults.alexandriaAnalysis?.summary || window.lastAnalysisResults.alexandriaAnalysis?.response || 'No analysis available'}
+`;
+    
+    navigator.clipboard.writeText(text).then(() => {
+      alert('Analysis results copied to clipboard!');
+    }).catch(() => {
+      // Fallback
+      const textArea = document.createElement('textarea');
+      textArea.value = text;
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textArea);
+      alert('Analysis results copied to clipboard!');
+    });
+  }
+}
+
+function showRawLogData() {
+  const rawDataDiv = document.getElementById('raw-log-data');
+  if (rawDataDiv) {
+    rawDataDiv.style.display = rawDataDiv.style.display === 'none' ? 'block' : 'none';
+  }
+}
+
+function copyRawLogData() {
+  if (window.lastAnalysisResults && window.lastAnalysisResults.alexandria) {
+    const text = `Alexandria Raw Log Data (${window.lastAnalysisResults.timestamp})
+
+${JSON.stringify(window.lastAnalysisResults.alexandria, null, 2)}`;
+    
+    navigator.clipboard.writeText(text).then(() => {
+      alert('Raw log data copied to clipboard!');
+    }).catch(() => {
+      // Fallback
+      const textArea = document.createElement('textarea');
+      textArea.value = text;
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textArea);
+      alert('Raw log data copied to clipboard!');
+    });
+  } else {
+    alert('No raw log data available to copy.');
+  }
+}
+
+async function testAPICall() {
+  console.log('[popup.js] Testing Alexandria API connection...');
+  
+  const testQuery = "Test connection to API - please respond with a simple confirmation message.";
+  
+  try {
+    const result = await summarizeLogsAPI(testQuery);
+    console.log('[popup.js] Alexandria API test successful:', result);
+    return result;
+  } catch (error) {
+    console.error('[popup.js] Alexandria API test failed:', error);
+    throw error;
+  }
+}
+
+function proceedWithLogSummarization() {
+  console.log('[popup.js] Proceeding with log summarization...');
+  
+  const logSummariesContent = document.getElementById('log-summaries-content');
+  
+  // Create the log summary container
+  const summaryContainer = document.createElement('div');
+  summaryContainer.className = 'log-summary-container';
+  
+  // Define the three log types and their queries
+  const logQueries = [
+    {
+      type: 'HQ Logs',
+      icon: '🏢',
+      className: 'log-type-hq',
+      query: 'Analyze HQ logs for errors, warnings, and performance issues'
+    },
+    {
+      type: 'LB Logs', 
+      icon: '⚖️',
+      className: 'log-type-lb',
+      query: 'Analyze Load Balancer logs for traffic patterns and failures'
+    },
+    {
+      type: 'Kamino Logs',
+      icon: '🧬',
+      className: 'log-type-kamino', 
+      query: 'Analyze Kamino logs for deployment and system health'
+    }
+  ];
+  
+  // Create blocks for each log type
+  logQueries.forEach(logQuery => {
+    const block = createLogSummaryBlock(logQuery);
+    summaryContainer.appendChild(block);
+  });
+  
+  logSummariesContent.innerHTML = '';
+  logSummariesContent.appendChild(summaryContainer);
+  
+  // Make API calls for each log type
+  logQueries.forEach((logQuery, index) => {
+    performLogSummaryCall(logQuery, index);
+  });
+}
+
+function createLogSummaryBlock(logQuery) {
+  const block = document.createElement('div');
+  block.className = 'log-summary-block';
+  block.id = `log-summary-${logQuery.type.toLowerCase().replace(' ', '-')}`;
+  
+  block.innerHTML = `
+    <div class="log-summary-header ${logQuery.className}">
+      <span>${logQuery.icon}</span>
+      <span>${logQuery.type}</span>
+    </div>
+    <div class="log-summary-content">
+      <div class="log-summary-loading">
+        <div class="loading-spinner"></div>
+        Analyzing ${logQuery.type}...
+      </div>
+    </div>
+  `;
+  
+  return block;
+}
+
+async function performLogSummaryCall(logQuery, index) {
+  const blockId = `log-summary-${logQuery.type.toLowerCase().replace(' ', '-')}`;
+  const block = document.getElementById(blockId);
+  if (!block) return;
+  
+  const contentArea = block.querySelector('.log-summary-content');
+  
+  try {
+    console.log(`[popup.js] Making API call for ${logQuery.type}...`);
+    
+    // Send just the query text string to the API
+    console.log(`[popup.js] Query for ${logQuery.type}:`, logQuery.query);
+    
+    const result = await summarizeLogsAPI(logQuery.query);
+    
+    // Display the response
+    contentArea.innerHTML = `
+      <div style="margin-bottom: 10px; font-weight: 600; color: #28a745;">
+        ✅ Analysis Complete
+      </div>
+      <div style="border: 1px solid #e0e0e0; padding: 10px; border-radius: 4px; background: #f8f9fa;">
+        <strong>Query:</strong><br>
+        <div style="font-style: italic; margin: 5px 0; color: #666;">${logQuery.query}</div>
+        <strong>AI Response:</strong><br>
+        <pre style="white-space: pre-wrap; font-size: 11px; margin: 5px 0;">${JSON.stringify(result, null, 2)}</pre>
+      </div>
+    `;
+    
+    console.log(`[popup.js] ${logQuery.type} summary completed:`, result);
+    
+  } catch (error) {
+    console.error(`[popup.js] Error summarizing ${logQuery.type}:`, error);
+    
+    contentArea.innerHTML = `
+      <div class="log-summary-error">
+        <div style="font-weight: 600; margin-bottom: 8px;">❌ Error occurred</div>
+        <div style="font-size: 12px; color: #721c24; margin-bottom: 8px;">
+          ${error.message || 'Failed to analyze logs'}
+        </div>
+        <details style="margin-top: 8px;">
+          <summary style="cursor: pointer; font-size: 11px; color: #666;">Show technical details</summary>
+          <div style="margin-top: 5px; font-size: 10px; font-family: monospace; background: #f1f1f1; padding: 8px; border-radius: 3px; white-space: pre-wrap;">
+${error.stack || error.toString()}
+          </div>
+        </details>
+      </div>
+    `;
+  }
+}
+
+// Test function for transaction rights formatting
+window.testTransactionRights = function() {
+  const sampleTransactionRights = {
+    "fundsTransfer": {
+      "view": 2,
+      "enabled": true,
+      "draft": true,
+      "authorize": true,
+      "cancel": true,
+      "draftRestricted": false,
+      "dualAuthLimit": 9999999.99
+    },
+    "externalTransfer": {
+      "view": 0,
+      "enabled": false,
+      "draft": false,
+      "authorize": false,
+      "cancel": false,
+      "draftRestricted": false,
+      "dualAuthLimit": 0
+    },
+    "billPayment": {
+      "view": 1,
+      "enabled": true,
+      "draft": true,
+      "authorize": true,
+      "cancel": true,
+      "draftRestricted": false,
+      "dualAuthLimit": -1
+    }
+  };
+  
+  console.log('[TEST] Testing transaction rights display with sample data');
+  console.log('[TEST] Sample data:', sampleTransactionRights);
+  
+  // First, switch to User Details tab if not already there
+  const userDetailsBtn = document.querySelector('[data-tab="user-details"]');
+  if (userDetailsBtn) {
+    userDetailsBtn.click();
+    console.log('[TEST] Switched to User Details tab');
+  }
+  
+  // Wait a moment for tab to switch, then activate transaction rights tab
+  setTimeout(() => {
+    const transactionTab = document.querySelector('[data-capability="transactions"]');
+    if (transactionTab) {
+      transactionTab.click();
+      console.log('[TEST] Activated Transaction Rights tab');
+      
+      // Wait for tab activation, then populate data
+      setTimeout(() => {
+        populateTransactionRights(sampleTransactionRights);
+        console.log('[TEST] Transaction rights populated. Check the User Details tab -> Transaction Rights section');
+        
+        // Verify the content is visible
+        const content = document.getElementById('transactions-content');
+        const grid = content ? content.querySelector('.capability-grid') : null;
+        if (content && grid) {
+          console.log('[TEST] Content element classes:', content.className);
+          console.log('[TEST] Grid innerHTML length:', grid.innerHTML.length);
+        }
+      }, 100);
+    } else {
+      console.error('[TEST] Could not find transaction rights tab');
+    }
+  }, 100);
+};
+
+// Debug function to check if elements exist
+window.debugTransactionRights = function() {
+  const content = document.getElementById('transactions-content');
+  const grid = content ? content.querySelector('.capability-grid') : null;
+  const transactionTab = document.querySelector('[data-capability="transactions"]');
+  const userDetailsBtn = document.querySelector('[data-tab="user-details"]');
+  
+  console.log('[DEBUG] User Details button:', userDetailsBtn);
+  console.log('[DEBUG] Transaction rights tab:', transactionTab);
+  console.log('[DEBUG] Transaction rights content element:', content);
+  console.log('[DEBUG] Transaction rights grid element:', grid);
+  
+  if (content) {
+    console.log('[DEBUG] Content element classes:', content.className);
+    console.log('[DEBUG] Content is visible:', content.offsetHeight > 0);
+  }
+  
+  if (!content) {
+    console.error('[DEBUG] Missing transactions-content element!');
+    return false;
+  }
+  
+  if (!grid) {
+    console.error('[DEBUG] Missing .capability-grid inside transactions-content!');
+    return false;
+  }
+  
+  console.log('[DEBUG] All elements found successfully');
+  return true;
+};
+
+// Force show transaction rights tab for testing
+window.forceShowTransactionRights = function() {
+  // Make transaction rights content visible
+  const content = document.getElementById('transactions-content');
+  if (content) {
+    content.classList.add('active');
+    content.style.display = 'block';
+    console.log('[FORCE] Made transaction rights content visible');
+  }
+  
+  // Activate the transaction rights tab
+  const transactionTab = document.querySelector('[data-capability="transactions"]');
+  if (transactionTab) {
+    transactionTab.classList.add('active');
+    console.log('[FORCE] Activated transaction rights tab');
+  }
+  
+  // Now run the test
+  window.testTransactionRights();
+};
+
+// Debug function to check logonUser request capture
+window.debugLogonUserCapture = function() {
+  console.log('[DEBUG] Checking logonUser request capture...');
+  
+  getNetworkData((response) => {
+    if (!response || !response.data) {
+      console.log('[DEBUG] No network data available');
+      return;
+    }
+    
+    console.log('[DEBUG] Total requests in data:', response.data.length);
+    
+    // Find all logonUser related requests
+    const logonUserRequests = response.data.filter(req => 
+      req.url?.includes('logonUser?') || 
+      req.isLogonUserCapture ||
+      req.url?.includes('logonUser')
+    );
+    
+    console.log('[DEBUG] Found', logonUserRequests.length, 'logonUser-related requests:');
+    
+    logonUserRequests.forEach((req, index) => {
+      console.log(`[DEBUG] LogonUser Request ${index + 1}:`, {
+        id: req.requestId,
+        url: req.url,
+        method: req.method,
+        status: req.statusCode,
+        hasResponseBody: !!req.responseBody,
+        responseBodyLength: req.responseBody ? req.responseBody.length : 0,
+        responseBodyPreview: req.responseBody ? req.responseBody.substring(0, 200) + '...' : 'none',
+        isLogonUserCapture: req.isLogonUserCapture,
+        timestamp: new Date(req.startTime || 0).toISOString(),
+        headers: req.responseHeaders ? Object.keys(req.responseHeaders).length : 0,
+        q2token: req.q2token
+      });
+      
+      if (req.responseBody) {
+        try {
+          const parsed = JSON.parse(req.responseBody);
+          console.log(`[DEBUG] Request ${index + 1} parsed response:`, {
+            hasData: !!parsed.data,
+            hasUserInfo: !!(parsed.data?.firstName || parsed.data?.lastName || parsed.data?.loginName),
+            dataKeys: parsed.data ? Object.keys(parsed.data) : [],
+            firstName: parsed.data?.firstName,
+            lastName: parsed.data?.lastName,
+            loginName: parsed.data?.loginName
+          });
+        } catch (e) {
+          console.log(`[DEBUG] Request ${index + 1} response body not valid JSON:`, req.responseBody.substring(0, 100));
+        }
+      }
+    });
+    
+    // Check current session data
+    if (currentSessionData && currentSessionData.requests) {
+      const sessionLogonRequests = currentSessionData.requests.filter(req => 
+        req.url?.includes('logonUser?') || req.isLogonUserCapture
+      );
+      console.log('[DEBUG] Current session has', sessionLogonRequests.length, 'logonUser requests');
+      sessionLogonRequests.forEach((req, index) => {
+        console.log(`[DEBUG] Session LogonUser ${index + 1}:`, {
+          url: req.url,
+          hasResponseBody: !!req.responseBody,
+          isLogonUserCapture: req.isLogonUserCapture
+        });
+      });
+    } else {
+      console.log('[DEBUG] No current session data available');
+    }
+    
+    // Test loading user details manually
+    console.log('[DEBUG] Testing manual user details load...');
+    loadUserDetailsData();
+  });
+};
+
+// Debug function to check inject.js status  
+window.debugInjectStatus = function() {
+  chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
+    if (tabs[0]) {
+      console.log('[DEBUG] Current tab URL:', tabs[0].url);
+      
+      // Try to send a message to content script to test communication
+      chrome.tabs.sendMessage(tabs[0].id, {
+        type: 'TEST_INJECT_STATUS'
+      }, (response) => {
+        if (chrome.runtime.lastError) {
+          console.error('[DEBUG] Error communicating with content script:', chrome.runtime.lastError.message);
+        } else {
+          console.log('[DEBUG] Content script response:', response);
+        }
+      });
+    }
+  });
+  
+  // Also test if we can trigger inject.js manually
+  console.log('[DEBUG] To test inject.js manually, run this in the page console:');
+  console.log('window.postMessage({type: "LOGON_USER_RESPONSE", data: {url: "test", responseBody: "test"}}, "*")');
+};
+
+// Force refresh User Details with latest data
+window.forceRefreshUserDetails = function() {
+  console.log('[FORCE] Forcing refresh of User Details tab...');
+  
+  // Clear current session data to force fresh load
+  currentSessionData = null;
+  
+  // Switch to User Details tab if not already there
+  const userDetailsBtn = document.querySelector('[data-tab="user-details"]');
+  if (userDetailsBtn && !userDetailsBtn.classList.contains('active')) {
+    userDetailsBtn.click();
+    console.log('[FORCE] Switched to User Details tab');
+  }
+  
+  // Wait a moment then force load fresh data
+  setTimeout(() => {
+    console.log('[FORCE] Loading fresh user details data...');
+    loadUserDetailsData();
+  }, 100);
+  
+  // Also refresh the whole popup to get latest session data
+  setTimeout(() => {
+    console.log('[FORCE] Refreshing network data...');
+    refreshNetworkData();
+  }, 200);
+};

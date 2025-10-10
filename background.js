@@ -678,8 +678,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     
     const responseData = message.data;
     
+    // Collect all requests from all sessions for debugging
+    const allRequests = [];
+    for (const session of Object.values(sessions)) {
+      if (session.requests) {
+        allRequests.push(...Object.values(session.requests));
+      }
+    }
+    
     // Log all existing logonUser requests for debugging
-    const existingLogonRequests = Object.values(requests).filter(req => 
+    const existingLogonRequests = allRequests.filter(req => 
       req.url?.includes('logonUser?') || req.isLogonUserCapture
     );
     console.log('[background.js] Existing logonUser requests:', existingLogonRequests.length);
@@ -694,11 +702,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     
     // Find matching request by URL and approximate timestamp
     let matchingRequest = null;
-    const requestArray = Object.values(requests);
     
-    // Look for request with same URL within last 30 seconds
+    // Look for request with same URL within last 30 seconds across all sessions
     const timeWindow = 30000; // 30 seconds
-    for (const req of requestArray) {
+    for (const req of allRequests) {
       if (req.url === responseData.url && 
           Math.abs((req.startTime || 0) - responseData.timestamp) < timeWindow) {
         matchingRequest = req;

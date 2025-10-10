@@ -12,6 +12,7 @@
         <div class="tab-navigation">
             <button class="tab-button active" data-tab="logs">Network Logs</button>
             <button class="tab-button" data-tab="user-details">User Details</button>
+            <button class="tab-button" data-tab="ai-insights">AI Insights</button>
             <button class="tab-button" data-tab="visualization">Visualization</button>
             <button class="tab-button" data-tab="settings">Settings</button>
         </div>
@@ -90,7 +91,7 @@
                             <!-- Features will be populated here -->
                         </div>
                     </div>
-                    <div id="transaction-rights-content" class="capability-content">
+                    <div id="transactions-content" class="capability-content">
                         <div class="capability-grid">
                             <!-- Transaction rights will be populated here -->
                         </div>
@@ -108,6 +109,179 @@
                 <h3>🎨 Environment Context</h3>
                 <div class="environment-content">
                     <div id="environment-data">No environment data available.</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- AI Insights Tab -->
+        <div id="ai-insights-tab" class="tab-content">
+            <div class="ai-header">
+                <h2>🤖 AI-Powered Session Analysis</h2>
+                <p class="ai-description">Intelligent insights and automated analysis of your session data</p>
+            </div>
+
+            <!-- Authentication Section -->
+            <div class="ai-section">
+                <h3>🔐 Authentication</h3>
+                <div id="auth-section" class="ai-content-area">
+                    <div id="auth-form" style="display: block;">
+                        <div style="margin-bottom: 10px;">
+                            <label style="display: block; margin-bottom: 5px; font-weight: 600;">Username:</label>
+                            <input type="text" id="auth-username" placeholder="Enter your username" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;">
+                        </div>
+                        <div style="margin-bottom: 15px;">
+                            <label style="display: block; margin-bottom: 5px; font-weight: 600;">Password:</label>
+                            <input type="password" id="auth-password" placeholder="Enter your password" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;">
+                        </div>
+                        <button id="auth-login" class="ai-action-btn" style="width: 100%;">
+                            🔓 Login & Get Token
+                        </button>
+                    </div>
+                    <div id="auth-status" style="display: none;">
+                        <div class="ai-placeholder">
+                            <span class="ai-placeholder-icon">✅</span>
+                            <p>Authenticated successfully! Token ready for use.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Quick Actions -->
+            <div class="ai-actions">
+                <button id="generate-summary" class="ai-action-btn primary">
+                    ⚡ Generate Smart Summary
+                </button>
+                <button id="analyze-performance" class="ai-action-btn">
+                    📊 Analyze Performance
+                </button>
+                <button id="detect-issues" class="ai-action-btn">
+                    🔍 Detect Issues
+                </button>
+                <button id="summarize-logs" class="ai-action-btn">
+                    📊 Summarize Logs
+                </button>
+                <button id="clear-analysis" class="ai-action-btn secondary">
+                    🗑️ Clear Analysis
+                </button>
+            </div>
+
+            <!-- AI Summary Section -->
+            <div class="ai-section">
+                <h3>📋 Intelligent Summary</h3>
+                <div id="ai-summary-content" class="ai-content-area">
+                    <div class="ai-placeholder">
+                        <span class="ai-placeholder-icon">🤖</span>
+                        <p>Click "Generate Smart Summary" to get AI-powered insights about your session</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Session Analytics Section -->
+            <div class="ai-section">
+                <h3>🎯 Session Analytics</h3>
+                <div id="session-analytics-content" class="ai-content-area">
+                    <div class="analytics-grid">
+                        <div class="analytics-card">
+                            <h4 id="slow-requests-title">⏱️ Slow Requests</h4>
+                            <div id="slow-requests-list" class="analytics-list">
+                                <div class="analytics-placeholder">No analysis available. Generate summary first.</div>
+                            </div>
+                        </div>
+                        <div class="analytics-card">
+                            <h4>❌ Error Analysis</h4>
+                            <div id="error-analysis-list" class="analytics-list">
+                                <div class="analytics-placeholder">No analysis available. Generate summary first.</div>
+                            </div>
+                        </div>
+                        <div class="analytics-card">
+                            <h4>📈 Performance Trends</h4>
+                            <div id="performance-trends" class="analytics-list">
+                                <div class="analytics-placeholder">No analysis available. Generate summary first.</div>
+                            </div>
+                        </div>
+                        <div class="analytics-card">
+                            <h4>🚀 Optimization Tips</h4>
+                            <div id="optimization-tips" class="analytics-list">
+                                <div class="analytics-placeholder">No analysis available. Generate summary first.</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Session Health Score -->
+            <div class="ai-section">
+                <h3>💯 Session Health Score</h3>
+                <div id="session-health-content" class="ai-content-area">
+                    <div class="health-score-container">
+                        <div class="health-score-circle">
+                            <span id="health-score-value">--</span>
+                            <small>/ 100</small>
+                        </div>
+                        <div class="health-details">
+                            <div id="health-breakdown" class="health-breakdown">
+                                <div class="health-placeholder">Generate analysis to see health score</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- AI Recommendations -->
+            <div class="ai-section">
+                <h3>💡 Smart Recommendations</h3>
+                <div id="ai-recommendations-content" class="ai-content-area">
+                    <div class="recommendations-list">
+                        <div class="ai-placeholder">
+                            <span class="ai-placeholder-icon">💡</span>
+                            <p>AI recommendations will appear here after analysis</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Log Summaries Section -->
+            <div class="ai-section">
+                <h3>📊 Log Summaries</h3>
+                
+                <!-- Time-based Search Bar -->
+                <div style="margin-bottom: 15px; padding: 15px; background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 6px;">
+                    <div style="margin-bottom: 10px;">
+                        <label style="display: block; margin-bottom: 5px; font-weight: 600;">🔍 Time-based Query:</label>
+                        <input type="text" id="time-query-input" placeholder="e.g., 'give me logs for last 10 mins', 'last 2 hours', 'past 30 minutes'" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;">
+                    </div>
+                    <button id="parse-time-query" style="padding: 8px 16px; background: #007acc; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 600;">
+                        🕒 Parse & Set Time
+                    </button>
+                    <div id="parsed-time-display" style="margin-top: 10px; padding: 8px; background: #e3f2fd; border-radius: 4px; display: none;">
+                        <strong>Parsed Time:</strong> <span id="parsed-time-value"></span>
+                    </div>
+                </div>
+
+                <!-- Environment-specific Log Summary Buttons -->
+                <div style="margin-bottom: 15px; padding: 15px; background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 6px;">
+                    <div style="margin-bottom: 10px; font-weight: 600;">📋 Summarize Logs by Environment:</div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                        <button id="summarize-hq-logs" class="ai-action-btn" style="font-size: 12px; padding: 8px 12px;">
+                            🏢 HQ Logs
+                        </button>
+                        <button id="summarize-kamino-logs" class="ai-action-btn" style="font-size: 12px; padding: 8px 12px;">
+                            🌊 Kamino Logs
+                        </button>
+                        <button id="summarize-lightbridge-logs" class="ai-action-btn" style="font-size: 12px; padding: 8px 12px;">
+                            🌉 LightBridge Logs
+                        </button>
+                        <button id="summarize-ardent-logs" class="ai-action-btn" style="font-size: 12px; padding: 8px 12px;">
+                            🔥 Ardent Logs
+                        </button>
+                    </div>
+                </div>
+                
+                <div id="log-summaries-content" class="ai-content-area">
+                    <div class="ai-placeholder">
+                        <span class="ai-placeholder-icon">📊</span>
+                        <p>Enter a time query above or click "Summarize Logs" to get AI-powered log analysis</p>
+                    </div>
                 </div>
             </div>
         </div>

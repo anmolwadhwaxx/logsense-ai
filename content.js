@@ -293,12 +293,21 @@ window.addEventListener('message', event => {
       chrome.runtime.sendMessage(messageData, (response) => {
         if (chrome.runtime.lastError) {
           console.error('[content.js] Error sending to background:', chrome.runtime.lastError.message);
+          // Don't return here - the error might be a timing issue but the message could still be received
         } else {
           console.log('[content.js] Successfully forwarded logonUser response to background, response:', response);
         }
       });
     } catch (error) {
       console.error('[content.js] Exception while sending message:', error);
+    }
+    
+    // Also try to send without callback to avoid port closure issues
+    try {
+      chrome.runtime.sendMessage(messageData);
+      console.log('[content.js] Sent logonUser response without callback as backup');
+    } catch (error) {
+      console.error('[content.js] Exception while sending backup message:', error);
     }
   }
 });
@@ -318,6 +327,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     window.postMessage({ type: 'REQUEST_UUX_ENV_INFO' }, '*');
 
     return true; // Required to keep the message channel open for async response
+  } else if (message.type === 'TEST_INJECT_STATUS') {
+    console.log('[content.js] Received TEST_INJECT_STATUS request');
+    
+    // Test if inject.js is working by sending a test message
+    window.postMessage({ type: 'TEST_FROM_CONTENT_TO_INJECT' }, '*');
+    
+    sendResponse({ 
+      status: 'Content script is working',
+      timestamp: Date.now(),
+      url: window.location.href
+    });
+    return true;
   }
 
   return false; // Don't keep the message channel open for other messages
