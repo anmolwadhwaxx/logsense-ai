@@ -20,7 +20,7 @@
 
 ##  Environment Details
 
-- Q2 Easy Log version:
+- Q2 LogEasy version:
 - Chrome version:
 - Operating system:
 - UUX version (if known):
@@ -39,4 +39,5 @@
 
 ---
 
-Thanks for helping improve Q2 Easy Log!
+Thanks for helping improve Q2 LogEasy!
+

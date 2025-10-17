@@ -1,414 +1,205 @@
-# Q2 Easy Log Chrome Extension
+# Q2 LogEasy
 
-**Q2 Easy Log** is a comprehensive Chrome extension designed to streamline debugging workflows for Q2 UUX (Universal User Experience) applications. It provides real-time network monitoring, intelligent session management, and seamless integration with Alexandria log search across multiple Q2 platforms.
-
----
-
-## Key Features
-
-### **Advanced Network Monitoring**
-
-- **Real-time traffic capture** using Chrome's webRequest API with comprehensive timing data
-- **Smart session tracking** with automatic q2token and workstation-id extraction from headers and cookies
-- **Intelligent request filtering** for Q2-specific traffic patterns with domain-based organization
-- **Complete header preservation** including authentication tokens, cookies, and custom headers
-- **Request/response body capture** for detailed debugging and HAR export compatibility
-- **Fi_no extraction** from CDN deport patterns for enhanced debugging context
-- **Smart duplicate elimination** with priority-based logonUser request deduplication
-
-### **Multi-Tab Interface & Visualization**
-
-- **Network Logs Tab**: Complete session management and request details with collapsible sections
-- **Visualization Tab**: Interactive charts and performance analytics
-  - **Request Timeline**: Real-time timeline visualization of network activity
-  - **Performance Metrics**: Total requests, average response time, error rate, and data transferred
-  - **Request Type Distribution**: Pie charts showing API, JavaScript, CSS, images, and HTML breakdown
-  - **Domain Analysis**: Top 10 domains by request count with visual indicators
-  - **Time Range Filtering**: 5 minutes, 15 minutes, 1 hour, or all-time views
-- **Settings Tab**: Centralized configuration for capture options, export settings, and site management
-
-### **Interactive Performance Analytics**
-
-- **Real-time metrics calculation** with automatic updates every 2 seconds
-- **Canvas-based charting** for lightweight, responsive visualizations
-- **Request categorization** with intelligent type detection (API, JS, CSS, Images, HTML)
-- **Performance heatmaps** showing response time distributions across domains
-- **Data transfer analytics** with byte formatting and transfer rate calculations
-- **Error rate monitoring** with visual indicators for failed requests
-
-### **Multi-Platform Alexandria Integration**
-
-- **HQ Logs** (Blue buttons): Session-based debugging with q2token using 30-minute time windows
-- **LightBridge Logs** (Green buttons): Workstation-based debugging with enhanced filtering using 30-minute windows
-- **Kamino Logs** (Gray buttons): Session-based tracking with advanced SPL queries using 30-minute windows
-- **Ardent Logs** (Red buttons): Workstation-based debugging with optimized 15-minute time windows for faster results
-- **Automatic SPL generation** with proper indexing, time ranges, and field extraction
-- **Environment-aware indexing** with automatic staging vs production detection based on URL patterns
-
-### **Intelligent Session Management**
-
-- **Dynamic session aggregation** with real-time request grouping by q2token
-- **Comprehensive session metrics** including request counts, timing analysis, and metadata correlation
-- **Smart time range calculation** (±5 minutes from session activity boundaries)
-- **Environment detection** with automatic staging/production identification via URL analysis
-- **Session persistence** with automatic cleanup and state management until session ID changes
-- **Workstation correlation** for accurate cross-platform debugging with automatic extraction from headers
-
-### **Enhanced User Experience**
-
-- **Modern tabbed interface** with intuitive navigation and visual feedback
-- **Responsive design** optimized for 450px popup width with flexible layouts
-- **Color-coded platform access** for instant visual identification of log sources
-- **Collapsible interface sections** for efficient space utilization and workflow optimization
-- **Professional styling** with consistent visual hierarchy and modern aesthetics
-- **Enhanced text handling** with proper word wrapping, overflow management, and readability
-- **Loading state management** to prevent UI flickering and improve perceived performance
-- **Anti-flicker optimizations** with transition and animation prevention during load
-- **Custom popup resizing** with drag functionality and responsive content adaptation
-
-### **Advanced Export & Integration**
-
-- **HAR (HTTP Archive) format export** with full compliance to HAR 1.2 specification standards
-- **CSV summary export** for simplified spreadsheet analysis (basic request data: URL, method, status, timing, Q2 tokens)
-- **HAR import functionality** for analysis of external capture files
-- **JSON data export** with structured session data for custom analysis tools
-- **Complete session preservation** including timing, headers, and payload data
-- **Developer-friendly formats** compatible with standard debugging and analysis tools
-- **Timestamped file naming** for organized export management
-
-### **Technical Excellence**
-
-- **Manifest V3 compliance** ensuring future-proof Chrome extension compatibility
-- **Service Worker architecture** for reliable background processing and memory efficiency
-- **Content script injection** for seamless page-level JavaScript object access (Ngam, Q2_CONFIG, Tecton)
-- **Environment metadata extraction** including UUX version, theme, language, CDN configuration, and platform data
-- **Performance optimization** with 50ms throttling, intelligent caching, and efficient DOM manipulation
-- **Cross-context messaging** for reliable communication between extension components
-- **Fallback mechanisms** for robust environment detection with timeout handling
+LogEasy is a Chrome extension that helps Q2 engineers diagnose Universal User Experience (UUX) issues in real time. It captures session traffic, assembles Alexandria-ready log queries, and presents the data through a modular interface aimed at fast triage and cross-team collaboration.
 
 ---
 
-## Latest Updates
+## Table of Contents
 
-### V3.0.0 - Advanced Session Isolation and Enhanced User Details (Latest)
-
-- **🔒 Multi-Tab Session Isolation**: Revolutionary popup source tab tracking prevents cross-session data contamination
-- **💎 Enhanced Transaction Rights Display**: Detailed permissions with view levels, action badges, and dual auth limits
-- **🐛 Comprehensive Debug System**: Advanced logging and troubleshooting capabilities for empty transaction rights
-- **🎨 Environment Context Integration**: New User Details environment section with cached data integration
-- **🧹 Code Cleanup**: Removed unused files and improved performance optimizations
-
-### Enhanced User Details Tab
-
-- **User Profile Section**: Complete user information display with session-filtered data
-- **Transaction Rights**: Dynamic permission parsing with visual badges for Draft/Authorize/Cancel actions
-- **Capabilities Management**: Feature flags and system flags with enhanced visualization
-- **Environment Context**: Real-time environment data display integrated with main tab cache
-- **Session Consistency**: User Details now matches Network Logs tab filtering behavior
-
-### Major UI/UX Improvements
-
-- **Complete interface redesign** with modern, professional styling and improved visual hierarchy
-- **Color-coded platform buttons** for intuitive Alexandria log access (HQ=Blue, LightBridge=Green, Kamino=Gray, Ardent=Red)
-- **Fully responsive layout** with adaptive button sizing and optimal space utilization
-- **Significant performance boost** with 70% faster popup loading times through advanced caching strategies
-- **Enhanced content presentation** with improved text wrapping, overflow handling, and readability optimization
-
-### Advanced Session Management
-
-- **Smart session state tracking** with automatic persistence and cleanup mechanisms
-- **Improved request filtering** with session-based grouping and intelligent relevance scoring
-- **Enhanced session summaries** with comprehensive metrics and real-time data aggregation
-- **Robust environment detection** including UUX metadata, version tracking, and configuration analysis
-
-### Technical Architecture Enhancements
-
-- **Optimized background processing** with improved service worker efficiency and memory management
-- **Enhanced content script injection** for better page compatibility and error handling
-- **Improved cross-component communication** with reliable message passing and state synchronization
-- **Advanced error handling** with comprehensive logging and graceful degradation strategies
-
-### Developer Experience Improvements
-
-- **Enhanced debugging capabilities** with detailed console logging and error tracking
-- **Comprehensive code documentation** with inline comments and architectural explanations
-- **Improved code maintainability** with modular structure and clear separation of concerns
-- **Better testing support** with structured data formats and predictable behavior patterns
-
-### Enhanced LogonUser Response Display (Latest)
-
-- **Advanced JSON formatting** with proper indentation and color-coded syntax highlighting for LogonUser response bodies
-- **Interactive download functionality** with enhanced metadata including capture timestamp, request URL, and source information
-- **Streamlined UI presentation** with removal of redundant session information to focus on relevant data per section
-- **Intelligent session management** with 2-second auto-refresh intervals and smart session change detection
-- **Comprehensive duplicate detection** with detailed logging to track request sources and identify duplicate LogonUser requests
-- **Enhanced debugging capabilities** for monitoring LogonUser request flow and session transitions
+1. [Highlights](#highlights)
+2. [Architecture at a Glance](#architecture-at-a-glance)
+3. [Prerequisites](#prerequisites)
+4. [Installation](#installation)
+5. [Daily Workflow](#daily-workflow)
+6. [Feature Details](#feature-details)
+7. [Alexandria Integration](#alexandria-integration)
+8. [Importing and Exporting Data](#importing-and-exporting-data)
+9. [Configuration Storage](#configuration-storage)
+10. [Diagnostics and Troubleshooting](#diagnostics-and-troubleshooting)
+11. [Development Guide](#development-guide)
+12. [Testing Checklist](#testing-checklist)
+13. [Release Process](#release-process)
+14. [Authors](#authors)
+15. [Contributing](#contributing)
 
 ---
 
-## Extension Architecture & User Interface
+## Highlights
 
-The extension features a sophisticated architecture with a comprehensive popup interface designed for efficient Q2 UUX debugging:
-
-### **Popup Interface Components**
-
-#### **Control Panel**
-- **Clear Data Button**: Instantly clears all captured network data and resets the session
-- **UTC Offset Configuration**: Customizable timezone offset (default: -0700) for accurate timestamp alignment
-- **Site Management**: 
-  - Dynamic site selector for switching between monitored domains
-  - Add custom sites functionality with persistent storage
-  - Automatic detection and addition of current active domains
-
-#### **Side Selection**
-- **Environment Context**: Client/Server/Other classification with custom side input option
-- **Debugging Context**: Helps categorize the debugging session for better organization
-
-#### **Collapsible Environment Information Panel**
-- **Real-time UUX metadata extraction** including:
-  - Application version from Ngam global object
-  - Theme and language detection from cookies and Q2_CONFIG
-  - Tecton platform and SDK version information
-  - CDN configuration details (base URL, customer number)
-- **Enhanced formatting** with proper data validation and error handling
-- **Expandable/collapsible design** to save screen space while maintaining accessibility
-
-#### **Session Summary Dashboard**
-- **Comprehensive session analytics** with real-time metrics:
-  - Total request count for active session
-  - Session ID (q2token) and Workstation ID correlation
-  - Environment detection (Staging vs Production)
-  - Calculated time ranges optimized for log searching
-- **Unified Alexandria Log Access** with color-coded buttons:
-  - **HQ Logs** (Blue): Session-based queries with q2token
-  - **LightBridge Logs** (Green): Workstation-based queries  
-  - **Kamino Logs** (Gray): Additional session tracking
-  - **Ardent Logs** (Red): Workstation-based with 15-minute windows
-- **Responsive button layout** that adapts to popup dimensions
-
-#### **Individual Request Explorer (Collapsible)**
-- **Detailed request analysis** without interface redundancy
-- **Complete header inspection** with timing analysis and payload examination
-- **Enhanced LogonUser response display** with JSON syntax highlighting and proper formatting
-- **Interactive download functionality** for LogonUser responses with metadata (timestamp, URL, source)
-- **Smart session change detection** with automatic refresh and duplicate request filtering
-- **Enhanced data visualization** with improved formatting and readability
-- **Request filtering** showing only session-relevant traffic
-
-#### **Export Actions**
-- **Download Full HAR Log**: Complete HTTP Archive export in industry-standard format
-- **Timestamped exports** for organized debugging session management
-
-### **Technical Implementation Details**
+- Modular popup built around ES modules and shared state.
+- Automatic correlation between q2token sessions, workstation IDs and Alexandria search windows.
+- Visualization tab that surfaces request counts, latency averages, error rates and top endpoints.
+- Settings panel with site management, side selection, UTC overrides, HAR/CSV export, and HAR import.
+- Full-session exports with timestamps and metadata suitable for further tooling.
+- Alexandria AI workflow that gathers logs across HQ, LightBridge, Kamino and Ardent with prompt-aware summaries.
 
 ---
 
-## Project Structure
+## Architecture at a Glance
 
-    ├── .git/                    # Git repository metadata
-    ├── .gitlab/                 # GitLab CI/CD configuration
-    ├── icons/
-    │   └── icon.png            # Extension icon (16x16, 48x48, 128x128)
-    ├── popup/
-    │   ├── popup.html          # Main extension popup interface
-    │   ├── popup.css           # Responsive styling with color-coded elements
-    │   └── popup.js            # Core popup logic and session management
-    ├── utils/
-    │   ├── har.js              # HAR (HTTP Archive) format utilities
-    │   └── inject.js           # Page context script for UUX data extraction
-    ├── background.js           # Service worker for network monitoring
-    ├── content.js              # Content script for page integration
-    ├── manifest.json           # Extension manifest (Manifest V3)
-    └── README.md               # Comprehensive documentation
+| Layer | File(s) | Responsibilities |
+|-------|---------|------------------|
+| Service Worker | `background.js` | Captures network traffic, deduplicates sessions, persists state to storage, receives injection events. |
+| Popup Shell | `popup/main.js`, `popup/state.js` | Initializes tabs, orchestrates polling, manages global popup state, routes user actions. |
+| Tabs & UI Modules | `popup/logsTab.js`, `popup/userDetailsTab.js`, `popup/visualizationTab.js`, `popup/alexandria/*` | Render data for each tab and provide user interactions. |
+| Utilities | `popup/utils.js`, `popup/runtimeClient.js`, `popup/sessionProcessor.js` | Formatting, hashing, runtime messaging, summary creation. |
+| Content & Injection | `content.js`, `utils/inject.js` | Injects page-context helper, collects UUX metadata, forwards captured LogonUser responses. |
 
 ---
 
-## File Descriptions
+## Prerequisites
 
-### Core Extension Files
-
-- **`manifest.json`**: Extension configuration with Manifest V3 compliance, permissions, and resource definitions
-- **`background.js`**: Service worker handling network request interception, data storage, and cross-component communication with enhanced LogonUser request tracking and duplicate detection logging
-- **`content.js`**: Content script providing page integration, script injection, and floating UI elements
-
-### User Interface Components
-
-- **`popup/popup.html`**: Main extension interface with collapsible sections, session dashboard, and control panel
-- **`popup/popup.css`**: Professional responsive styling with:
-  - Color-coded Alexandria log buttons (HQ=Blue, LightBridge=Green, Kamino=Gray, Ardent=Red)
-  - Anti-flicker optimizations and layout containment
-  - Enhanced text wrapping and overflow management
-  - Flexbox responsive design optimized for 400px popup width
-- **`popup/popup.js`**: Core application logic featuring:
-  - Intelligent session aggregation and management
-  - Real-time Alexandria log URL generation with environment detection
-  - Enhanced LogonUser response display with JSON formatting and syntax highlighting
-  - Interactive download functionality for LogonUser responses with comprehensive metadata
-  - Smart session change detection with automatic refresh capabilities
-  - Comprehensive duplicate request detection and logging
-  - HAR export functionality with timestamp-based file naming
-  - Environment metadata display and session persistence
-
-### Utility Modules
-
-- **`utils/inject.js`**: Page context script for extracting UUX environment data:
-  - Ngam application version detection
-  - Q2_CONFIG and Tecton platform information
-  - Cookie-based theme and language detection
-  - CDN configuration extraction with fallback handling
-- **`utils/har.js`**: HAR (HTTP Archive) format utilities for:
-  - Standard HAR 1.2 compliant export generation
-  - Request/response data formatting and validation
-  - Timing information preservation and entry structuring
-
-### Visual Assets
-
-- **`icons/icon.png`**: Multi-resolution extension icon supporting 16px, 48px, and 128px formats for various Chrome UI contexts
+- Chrome 114 or newer (Manifest V3 support).
+- Developer mode enabled for loading unpacked extensions.
+- Access to Alexandria endpoints (authentication token required for AI summaries).
 
 ---
 
-## Installation & Setup
+## Installation
 
-### Prerequisites
-
-- Google Chrome or Chromium-based browser
-- Developer mode enabled for extension installation
-
-### Installation Steps
-
-1. **Download the Extension**
-   - Clone the repository: `git clone <repository-url>`
-   - Or download the ZIP file and extract it
-
-2. **Enable Developer Mode**
-   - Open Chrome and navigate to `chrome://extensions/`
-   - Toggle **"Developer mode"** in the top-right corner
-
-3. **Load the Extension**
-   - Click **"Load unpacked"**
-   - Select the root folder of the Q2 Easy Log project
-   - The extension icon should appear in your Chrome toolbar
-
-4. **Verify Installation**
-   - Click the extension icon to open the popup
-   - The interface should display with collapsible sections and controls
-   - Navigate to a Q2 UUX application to begin capturing network data
-
-### Configuration
-
-- **UTC Offset**: Set your timezone offset for accurate timestamp correlation
-- **Site Management**: Add specific Q2 domains you want to monitor
-- **Environment Detection**: The extension automatically detects staging vs production environments
+1. Clone or download the repository.
+2. Open Chrome and navigate to `chrome://extensions`.
+3. Enable **Developer mode** in the top-right corner.
+4. Select **Load unpacked** and choose the project root (`easy-logs/` directory after this refactor).
+5. Confirm that the action icon appears in the toolbar; pin it if necessary.
 
 ---
 
-## How It Works
+## Daily Workflow
 
-The extension operates through a coordinated system of components:
-
-### 1. **Background Service Worker**
-- `background.js` uses Chrome’s `webRequest` API to capture:
-  - Request/response headers
-  - Timestamps
-  - Status codes
-- Stores request data and provides it to the popup or content scripts.
-
-### 2. **Popup Interface**
-
-- `popup.html`, `popup.js`, and `popup.css` power the extension UI.
-- Shows a list of captured network requests and environment metadata.
-- Generates Alexandria log search URLs for HQ, LightBridge, Kamino, and Ardent platforms.
-- Features enhanced UI with color-coded interactive log buttons for easy platform identification.
-- Improved text wrapping and collapsible environment info section for better usability.
-- Responsive flexbox layout that adapts to different popup sizes.
-- Includes User Info section and download functionality for future enhancements.
-
-### 3. **Content Script**
-- `content.js` injects a floating button into pages.
-- Communicates with `inject.js` (which runs in the page context) to access global JS variables and cookies (like `Ngam`, `Q2_CONFIG`, etc.).
-- Collects UUX environment details and forwards them to the popup and background.
-
-### 4. **Script Injection**
-- `inject.js` runs in the page’s JS context.
-- Extracts UUX-specific metadata like:
-  - UUX version
-  - Theme
-  - Language
-  - CDN base URL
-  - Platform/SDK version
-- Sends data back via `window.postMessage`.
+1. Navigate to a UUX environment and open the LogEasy popup.
+2. Browse the **Network Logs** tab to verify active sessions, logonUser responses, and Alexandria links.
+3. Use the **Visualization** tab for latency and error outliers.
+4. Switch to **AI Insights** to authenticate with Alexandria and request AI summaries or environment-specific searches.
+5. Manage domains, sides, and exports within **Settings**. Use UTC override when collaborating across time zones.
 
 ---
 
+## Feature Details
 
-## Required Permissions
+### Network Logs
+- Session summary with total requests, session ID, workstation ID, UTC-aware timeframe.
+- Alexandria shortcut buttons per platform with environment detection.
+- Request list highlighting `logonUser` responses and providing JSON download/pretty view.
+- Collapsible sections and search-friendly markup to keep the UI responsive.
 
-```json
-"permissions": [
-  "tabs",
-  "storage",
-  "cookies",
-  "scripting",
-  "activeTab",
-  "webRequest"
-],
-"host_permissions": [
-  "<all_urls>"
-]
+### User Details
+- Parses the latest `logonUser` response and surfaces profile, session, capability, and environment data.
+- Normalizes field names (session token, timeouts, CSR flags) and fills common gaps where possible.
+- Provides tabbed capability grids with click-to-toggle behaviour for features, transaction rights, and system flags.
+- Re-renders on demand from the Settings or Logs tabs when new data is captured.
+
+### Visualization
+- Metrics panel for total requests, average response time, error rate, and transfer volume.
+- Timeline canvas grouped by minute to spot spikes.
+- Pie chart illustrating request type distribution.
+- Endpoint analysis that normalizes IDs and surfaces top-ten paths.
+
+### AI Insights
+- Auth form caching tokens locally with eight-hour TTL.
+- Buttons to summarize all environments or a single platform.
+- Prompt previews, AI responses, failure handling, and `.log` downloads per environment.
+- Comprehensive summary card with aggregate links, counts, and clipboard shortcuts.
+
+### Settings
+- Time configuration with validated UTC offset override; re-renders existing data on change.
+- Site management that stores frequently visited domains and preferred sides in `chrome.storage.local`.
+- Capture options controlling response body capture, deduplication, and timing visibility (future toggles).
+- Export tools for HAR and CSV, plus HAR import that feeds captured data back through the session store.
+
+---
+
+## Alexandria Integration
+
+When a session is active, LogEasy derives:
+
+- Session ID (`q2token`) and workstation ID.
+- Environment classification (staging vs production).
+- Time window with automatic buffer (`±5 minutes`, or `-15m` for Ardent).
+
+Generated URLs follow these templates:
+
 ```
-These permissions are necessary to monitor network traffic, read cookies, and interact with the current tab.
+search index="app_logs_{prod|stage}_{hq|lightbridge|kamino|ardent}"
+  {sessionId|workstationId}="..."
+  earliest="..."
+  latest="..."
+| fields *
+| extract
+| sort timestamp, seqId
+| head 10000
+```
+
+The AI workflow builds upon this data: it fetches log entries, flattens each record, assembles prompts, and allows exporting flattened `.log` files that contain every field of the Alexandria response.
 
 ---
 
-## Alexandria Log URLs
+## Importing and Exporting Data
 
-For each captured request, URLs are generated for multiple Alexandria log platforms:
-
-### HQ Logs
-
-    https://alexandria.shs.aws.q2e.io/logs/<SEARCH_STRING>
-
-### LightBridge Logs
-
-    https://alexandria.shs.aws.q2e.io/logs/<LIGHTBRIDGE_SEARCH_STRING>
-
-### Kamino Logs
-
-    https://alexandria.shs.aws.q2e.io/logs/<KAMINO_SEARCH_STRING>
-
-### Ardent Logs
-
-    https://alexandria.shs.aws.q2e.io/logs/<ARDENT_SEARCH_STRING>
-
-Search strings are automatically generated with the following format:
-
-**HQ & Kamino (Session-based):**
-
-    search index="app_logs_{prod/stage}_{hq/kamino}" sessionId="..." earliest="..." latest="..." | fields * | extract | sort timestamp, seqId | head 10000
-
-**LightBridge & Ardent (Workstation-based):**
-
-    search index="app_logs_{prod/stage}_{lightbridge/ardent}" workstationId="..." earliest="..." latest="..." | fields * | extract | sort timestamp, seqId | head 10000
-
-**Note:** Ardent logs use a 15-minute time window (`earliest="-15m"`) instead of the 30-minute window used by other platforms.
-
-This enables comprehensive log lookup across all Q2 platforms for debugging user sessions.
+| Action | Location | Notes |
+|--------|----------|-------|
+| Export HAR | Settings tab | Uses background session data; filenames include timestamp and scope. |
+| Export CSV | Settings tab | Provides a lean summary for spreadsheet review. |
+| Import HAR | Settings tab | Converts entries into LogEasy request objects and injects them into the session store. |
+| Download `logonUser` JSON | Network Logs tab | Metadata wrapper includes capture timestamp, URL, and source. |
+| Download Alexandria Logs | AI Insights tab | Full-field flattened output per environment or batch download. |
 
 ---
 
-## Development Notes
+## Configuration Storage
 
-- `utils/har.js` includes functions to format request/response data into HAR format (can be extended for HAR export).
-- `popup.js` has helper functions to extract, format, and render network request metadata with support for multiple log platforms.
-- Content and popup scripts use `chrome.runtime.sendMessage()` for cross-context communication.
-- The UI includes a collapsible panel for viewing environment info in detail with enhanced styling.
-- Enhanced CSS styling provides better text wrapping and improved readability for long URLs and text content.
-- Color-coded log buttons provide intuitive access to different Alexandria platforms:
-  - HQ Logs: Blue (#007BFF)
-  - LightBridge Logs: Green (#28A745)
-  - Kamino Logs: Gray (#6C757D)
-  - Ardent Logs: Red (#DC3545)
-- Responsive button layout adapts to different popup sizes with flexbox design.
+- **`logeasy_sessions`**: persisted sessions and their requests.
+- **`logeasy_env_info`**: cached UUX metadata for quick reloads.
+- **`logeasy_site_preferences`** (stored via Settings UI): site list, selected side, and user overrides.
+- Alexandria token cached with expiry metadata for AI workflows.
+
+Data is stored in `chrome.storage.local` and can be cleared from the Settings tab or Chrome's site data tools.
+
+---
+
+## Diagnostics and Troubleshooting
+
+- **No requests captured**: ensure the target tab is active, then refresh the popup. LogEasy throttles updates if the hash has not changed.
+- **`logonUser` response missing**: verify the site is not blocking injection. Open DevTools console to check for `[inject.js]` logs.
+- **Alexandria errors**: inspect the AI Insights tab; the UI surfaces response codes and text when the API fails.
+- **HAR import fails**: check the console for parsing issues. Only HAR 1.2 compliant files are supported.
+- **Time offsets incorrect**: adjust the UTC offset in Settings; LogEasy will re-render all views with the new offset while preserving data.
+
+For deeper debugging, run Chrome with the Extensions page open and inspect the **background page** or **popup** contexts via DevTools.
+
+---
+
+## Development Guide
+
+1. **Install dependencies**: no build step is required, but Node tooling can be added if you plan to lint or test.
+2. **Recommended tooling**: VS Code with ESLint and Prettier, Chrome DevTools for background/popup debugging.
+3. **Module layout**: each tab has its own module; shared state lives in `popup/state.js`. When adding functionality, prefer creating a focused module rather than expanding `main.js`.
+4. **Messaging**: runtime messaging (`chrome.runtime.sendMessage`) is centralized in `popup/runtimeClient.js` to keep the popup modules declarative.
+5. **Formatting helpers**: `popup/utils.js` includes sanitization helpers (`escapeHtml`, `formatDateTimeWithOffset`, etc.). Extend these rather than re-implementing formatting logic.
+6. **Alexandria helpers**: `popup/alexandria/helpers.js` should be the single source of truth for prompt manipulation and log selection heuristics.
+7. **Background capture**: any new request metadata should be added through `background.js` so it automatically reaches both popup and exports.
+
+---
+
+## Testing Checklist
+
+- Load the extension in developer mode and capture a real session (on staging and production).
+- Confirm the Network Logs tab updates every two seconds when requests are flowing.
+- Validate that `logonUser` responses render, can be toggled, and export JSON correctly.
+- Run AI Insights: authenticate, summarize all environments, download logs, copy summaries.
+- Exercise the Settings tab: change UTC offset, add/remove sites, export/import HAR, export CSV.
+- Import a saved HAR file and verify it appears in the popup and visualizations.
+- Review the background console for warnings or uncaught errors while performing the above steps.
+
+---
+
+## Release Process
+
+1. Update `manifest.json` version and changelog in `README.md` or release notes.
+2. Run through the testing checklist.
+3. Commit changes and create a tagged release in Git.
+4. Build a zipped package (from the project root) and upload to the Chrome Web Store or internal distribution channel.
+5. Notify implementation teams with highlights and any required post-install actions (e.g., new permissions).
 
 ---
 

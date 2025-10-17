@@ -1,3 +1,19 @@
+/**
+ * @file        inject.js
+ * @description Page-context script injected by the content script to intercept logonUser traffic and forward data back to LogEasy.
+ *
+ * @summary
+ *  Functions:
+ *    - getCurrentSessionId(): Extract q2token from document cookies.
+ *    - interceptLogonUser(): Wrap XHR/fetch to capture logonUser requests and responses.
+ *    - captureResponseBody(response, requestId): Relay response body data via postMessage to the content script.
+ *    - postLogonUserResponse(details): Normalize and dispatch captured logonUser payloads to the background.
+ *
+ * @author      Hitesh Singh Solanki
+ * @version     4.0.0
+ * @lastUpdated 2025-10-16
+ */
+
 // Self-invoking function to avoid polluting global scope
 (function () {
   console.log('[inject.js] Script loaded and starting logonUser interception setup');
@@ -76,7 +92,8 @@
             responseBody: responseBody,
             timestamp: Date.now(),
             headers: Object.fromEntries(response.headers.entries()),
-            q2token: sessionId
+            q2token: sessionId,
+            pageUrl: window.location.href
           }
         };
         
@@ -102,14 +119,14 @@
   // Also intercept XMLHttpRequest for older Q2 applications
   XMLHttpRequest.prototype.open = function(method, url, ...args) {
     console.log('[inject.js] XHR open intercepted:', method, url);
-    this._easyLogUrl = url;
-    this._easyLogMethod = method;
+    this._logEasyUrl = url;
+    this._logEasyMethod = method;
     return originalXHROpen.apply(this, [method, url, ...args]);
   };
   
   XMLHttpRequest.prototype.send = function(...args) {
-    if (this._easyLogUrl && this._easyLogUrl.includes('logonUser?')) {
-      console.log('[inject.js] LogonUser XHR request detected!', this._easyLogUrl);
+    if (this._logEasyUrl && this._logEasyUrl.includes('logonUser?')) {
+      console.log('[inject.js] LogonUser XHR request detected!', this._logEasyUrl);
       
       // Set up response handler
       this.addEventListener('loadend', () => {
@@ -120,14 +137,15 @@
             const messageData = {
               type: 'LOGON_USER_RESPONSE',
               data: {
-                url: this._easyLogUrl,
-                method: this._easyLogMethod || 'GET',
+                url: this._logEasyUrl,
+                method: this._logEasyMethod || 'GET',
                 status: this.status,
                 statusText: this.statusText,
                 responseBody: this.responseText,
                 timestamp: Date.now(),
                 headers: this.getAllResponseHeaders(),
-                q2token: sessionId
+                q2token: sessionId,
+                pageUrl: window.location.href
               }
             };
             
@@ -230,3 +248,5 @@
   // Immediately start waiting/checking for env info on script load
   waitForGlobals();
 })();
+
+

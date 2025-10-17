@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Q2 Easy Log",
+  "name": "Q2 LogEasy",
   "version": "3.0.0",
-  "description": "A Chrome extension that prepares debug log URL for Q2 UUX activities",
+  "description": "LogEasy streamlines Q2 UUX debugging with session capture, Alexandria search shortcuts, and import/export tools.",
   "permissions": [
     "tabs",
     "storage",
@@ -44,3 +44,4 @@
     "128": "icons/icon.png"
   }
 }
+

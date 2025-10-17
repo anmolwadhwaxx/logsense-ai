@@ -1,3 +1,19 @@
+/**
+ * @file        content.js
+ * @description Injects LogEasy helpers into the active tab, surfaces captured network data, and bridges messaging between page, background, and popup contexts.
+ *
+ * @summary
+ *  Functions:
+ *    - fallbackInjectScript(file, nodeTag): Inject the page-context helper script when declarative injection falls back.
+ *    - createFloatingButton(): Render a floating UI button that allows manual fetching/exporting of captured network data.
+ *    - displayNetworkData(data): Present captured requests/responses in an overlay table with export controls.
+ *    - exportAsHAR(data): Convert captured network traffic into a HAR archive and trigger download.
+ *
+ * @author      Hitesh Singh Solanki
+ * @version     4.0.0
+ * @lastUpdated 2025-10-16
+ */
+
 // Log to confirm content script is loaded
 console.log('[content.js] loaded');
 
@@ -180,7 +196,7 @@ function exportAsHAR(data) {
   const harData = {
     log: {
       version: "1.2",
-      creator: { name: "Q2 Easy Log", version: "1.0" },
+      creator: { name: "Q2 LogEasy", version: "1.0" },
       entries: data.map(entry => ({
         startedDateTime: new Date(entry.startTime).toISOString(),
         time: (entry.endTime && entry.startTime) ? (entry.endTime - entry.startTime) : 0,
@@ -343,3 +359,5 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   return false; // Don't keep the message channel open for other messages
 });
+
+

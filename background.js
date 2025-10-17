@@ -1,3 +1,22 @@
+/**
+ * @file        background.js
+ * @description Service worker that captures network traffic, manages LogEasy sessions, and communicates with popups/content scripts.
+ *
+ * @summary
+ *  Functions:
+ *    - getOrCreateSession(sessionId): Ensure a session record exists and update its activity timestamp.
+ *    - extractSessionId(requestHeaders, url): Resolve the session identifier from request metadata.
+ *    - saveSessionsToStorage(): Persist session cache to chrome.storage with debounce and cleanup handling.
+ *    - cleanupOldSessions(): Trim stored sessions/requests to configured limits.
+ *    - findSessionIdForDomain(domain): Recover the latest session id associated with a domain when headers are missing.
+ *    - createSyntheticLogonRequest(responseData): Reconstruct logonUser requests captured via injected scripts.
+ *    - handleCapturedResponse(message): Attach captured response bodies to stored requests.
+ *
+ * @author      Hitesh Singh Solanki
+ * @version     4.0.0
+ * @lastUpdated 2025-10-16
+ */
+
 // Store all captured request data organized by session ID
 const sessions = {}; // sessionId -> { requests: {}, envInfo: null, lastActivity: timestamp }
 const recentSessionsByDomain = {}; // domain -> sessionId (for fallback during refresh)
@@ -6,8 +25,8 @@ let popupCounter = 0; // Generate unique popup IDs
 const MAX_STORED_REQUESTS_PER_SESSION = 500;
 const MAX_SESSIONS = 10; // Keep last 10 sessions
 const SESSION_CLEANUP_INTERVAL = 5 * 60 * 1000; // 5 minutes
-const STORAGE_KEY = 'easylog_sessions';
-const ENV_STORAGE_KEY = 'easylog_env_info';
+const STORAGE_KEY = 'logeasy_sessions';
+const ENV_STORAGE_KEY = 'logeasy_env_info';
 
 // Store latest environment info sent from content script
 let cachedEnvInfo = null;
@@ -233,6 +252,50 @@ function extractFiNo(url) {
   return match ? match[1] : null;
 }
 
+function normalizeUrl(url, baseUrl) {
+  if (!url) return '';
+  try {
+    return new URL(url).href;
+  } catch {
+    if (baseUrl) {
+      try {
+        return new URL(url, baseUrl).href;
+      } catch {
+        try {
+          const origin = new URL(baseUrl).origin;
+          return new URL(url, origin).href;
+        } catch {
+          return url;
+        }
+      }
+    }
+    return url;
+  }
+}
+
+function findSessionIdForDomain(domain) {
+  if (!domain) return null;
+  if (recentSessionsByDomain[domain]) {
+    return recentSessionsByDomain[domain];
+  }
+
+  for (const [sessionId, session] of Object.entries(sessions)) {
+    if (!session?.requests) continue;
+    const hasMatchingDomain = Object.values(session.requests).some(request => {
+      try {
+        return new URL(request.url).hostname === domain;
+      } catch {
+        return false;
+      }
+    });
+    if (hasMatchingDomain) {
+      return sessionId;
+    }
+  }
+
+  return null;
+}
+
 // --- Web Request Listeners ---
 
 // Temporary storage for requests before we know their session ID
@@ -363,7 +426,7 @@ function captureLogonUserResponse(url, requestId) {
   // This function runs in the page context
   
   // Override fetch if not already done
-  if (!window.easyLogFetchOverridden) {
+  if (!window.logEasyFetchOverridden) {
     const originalFetch = window.fetch;
     window.fetch = async function(...args) {
       const [resource, config] = args;
@@ -394,13 +457,13 @@ function captureLogonUserResponse(url, requestId) {
             }
           });
         } catch (error) {
-          console.warn('[EasyLog] Failed to capture response body:', error);
+          console.warn('[LogEasy] Failed to capture response body:', error);
         }
       }
       
       return response;
     };
-    window.easyLogFetchOverridden = true;
+    window.logEasyFetchOverridden = true;
   }
   
   // Also check if request was made via XHR
@@ -408,21 +471,21 @@ function captureLogonUserResponse(url, requestId) {
   const originalXHRSend = XMLHttpRequest.prototype.send;
   
   XMLHttpRequest.prototype.open = function(method, requestUrl, ...args) {
-    this._easyLogUrl = requestUrl;
-    this._easyLogRequestId = requestId;
+    this._logEasyUrl = requestUrl;
+    this._logEasyRequestId = requestId;
     return originalXHROpen.apply(this, [method, requestUrl, ...args]);
   };
   
   XMLHttpRequest.prototype.send = function(...args) {
-    if (this._easyLogUrl === url) {
+    if (this._logEasyUrl === url) {
       this.addEventListener('loadend', () => {
         if (this.readyState === 4) {
           try {
             chrome.runtime.sendMessage({
               type: 'LOGON_USER_RESPONSE_CAPTURED',
               data: {
-                requestId: this._easyLogRequestId,
-                url: this._easyLogUrl,
+                requestId: this._logEasyRequestId,
+                url: this._logEasyUrl,
                 responseBody: this.responseText,
                 status: this.status,
                 statusText: this.statusText,
@@ -430,7 +493,7 @@ function captureLogonUserResponse(url, requestId) {
               }
             });
           } catch (error) {
-            console.warn('[EasyLog] Failed to capture XHR response body:', error);
+            console.warn('[LogEasy] Failed to capture XHR response body:', error);
           }
         }
       });
@@ -677,6 +740,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     console.log('[background.js] Received LOGON_USER_RESPONSE!', message.data?.url);
     
     const responseData = message.data;
+    const baseUrl = responseData.pageUrl || sender.tab?.url || null;
+    const normalizedResponseUrl = normalizeUrl(responseData.url, baseUrl);
     
     // Collect all requests from all sessions for debugging
     const allRequests = [];
@@ -706,7 +771,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // Look for request with same URL within last 30 seconds across all sessions
     const timeWindow = 30000; // 30 seconds
     for (const req of allRequests) {
-      if (req.url === responseData.url && 
+      const candidateUrl = normalizeUrl(req.url, baseUrl);
+      if (candidateUrl === normalizedResponseUrl &&
           Math.abs((req.startTime || 0) - responseData.timestamp) < timeWindow) {
         matchingRequest = req;
         console.log('[background.js] Found matching request for response body:', req.requestId);
@@ -725,26 +791,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const syntheticId = 'logon_' + Date.now();
       
       // Ensure we have an absolute URL
-      let absoluteUrl = responseData.url;
-      if (responseData.url && !responseData.url.startsWith('http')) {
-        // Convert relative URL to absolute using the sender tab's URL
-        try {
-          const tabUrl = sender.tab?.url;
-          if (tabUrl) {
-            const baseUrl = new URL(tabUrl);
-            // For relative URLs like "mobilews/logonUser?ws25", we need to resolve against the tab's path
-            // This will preserve the FI-specific path structure
-            absoluteUrl = new URL(responseData.url, tabUrl).href;
-            console.log('[background.js] Converted relative URL:', responseData.url, 'to absolute:', absoluteUrl, 'using base:', tabUrl);
-          } else {
-            console.warn('[background.js] No tab URL available for relative URL conversion:', responseData.url);
-            absoluteUrl = responseData.url; // fallback to original
-          }
-        } catch (error) {
-          console.warn('[background.js] Failed to convert relative URL:', responseData.url, error);
-          absoluteUrl = responseData.url; // fallback to original
-        }
-      }
+      const absoluteUrl = normalizedResponseUrl || responseData.url;
       
       // Create synthetic request and store in appropriate session
       const syntheticRequest = {
@@ -762,10 +809,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       };
       
       // Store in the appropriate session
-      const sessionId = responseData.q2token || 'captured_' + Date.now();
+      let sessionId = responseData.q2token || null;
+      let responseDomain = null;
+      try {
+        responseDomain = absoluteUrl ? new URL(absoluteUrl).hostname : null;
+      } catch {
+        responseDomain = null;
+      }
+
+      if (!sessionId && responseDomain) {
+        sessionId = findSessionIdForDomain(responseDomain);
+      }
+      if (!sessionId) {
+        sessionId = 'captured_' + Date.now();
+      }
+
       const session = getOrCreateSession(sessionId);
       if (session) {
+        syntheticRequest.q2token = sessionId;
         session.requests[syntheticId] = syntheticRequest;
+        if (responseDomain) {
+          recentSessionsByDomain[responseDomain] = sessionId;
+        }
         console.log(`[background.js] Created synthetic logonUser request in session ${sessionId}:`, syntheticId);
       }
     }
@@ -856,3 +921,4 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse(sessionInfo);
   }
 });
+

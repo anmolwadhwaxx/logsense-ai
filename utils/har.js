@@ -51,3 +51,4 @@ function formatEntry(request, response, startTime, endTime) {
 }
 
 export { createHARLog, formatEntry };
+

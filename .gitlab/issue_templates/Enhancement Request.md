@@ -7,7 +7,7 @@
 ##  Motivation
 
 > What problem does this enhancement solve?
-> Why is it important for Implementation Engineers or other users of the Q2 Easy Log extension?
+> Why is it important for Implementation Engineers or other users of the Q2 LogEasy extension?
 
 ##  Proposed Solution
 
@@ -49,4 +49,5 @@
 - Alignment with project goals
 - Developer effort vs. value added
 
-Thanks for contributing to Q2 Easy Log!
+Thanks for contributing to Q2 LogEasy!
+

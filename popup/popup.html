@@ -1,4 +1,19 @@
 <!DOCTYPE html>
+<!--
+ @file        popup.html
+ @description Markup skeleton for the LogEasy popup UI including tabs for logs, user details, AI insights, visualization, and settings.
+
+ @summary
+  Sections:
+    - Tab Navigation: Buttons to switch between Logs, User Details, AI Insights, Visualization, and Settings panes.
+    - Logs Tab: Containers for summary, collapsible network request list, and environment info.
+    - User Details / AI Insights / Visualization Tabs: Dedicated panels populated by corresponding JS modules.
+    - Settings Tab: Capture/export configuration inputs.
+
+ @author      Hitesh Singh Solanki
+ @version     4.0.0
+ @lastUpdated 2025-10-16
+-->
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -418,6 +433,8 @@
             </div>
         </div>
     </div>
-    <script src="popup.js"></script>
+    <script type="module" src="main.js"></script>
 </body>
 </html>
+
+
