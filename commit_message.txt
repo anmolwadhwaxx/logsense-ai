@@ -1,6 +1,0 @@
-refactor: adopt modular popup architecture and rebrand to LogEasy
-
-- replace legacy popup with modular ES module implementation
-- migrate background, content, and inject scripts to the new structure
-- rebrand UI copy and docs from Easy Logs to LogEasy
-- overhaul README with architecture, workflow, and testing guidance

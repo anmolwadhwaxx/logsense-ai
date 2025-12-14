@@ -1,0 +1,117 @@
+id: logsense-ai
+namespace: logsense
+
+labels:
+  app: LogSense AI
+  usecase: synthetic-log-intel
+
+description: |
+  Generates synthetic JSON logs, runs them through Kestra's AI Agent, and emits
+  a structured response that matches the frontend contract. Ready for the Wakanda Data Award.
+
+inputs:
+  - name: window
+    type: INT
+    defaults: 10
+    description: Minutes of logs to synthesize (allowed: 5, 10, 30).
+
+variables:
+  allowed_windows: [5, 10, 30]
+  error_threshold_base: 0.6
+
+tasks:
+  - id: validate_window
+    type: io.kestra.plugin.core.flow.Switch
+    value: "{{ inputs.window }}"
+    cases:
+      - when: "{{ vars.allowed_windows }}"
+        tasks:
+          - id: generate_logs
+            type: io.kestra.plugin.core.script.Python
+            description: Creates synthetic logs that mirror the structure consumed by the frontend.
+            script: |
+              import json, random, time
+              from datetime import datetime, timedelta
+
+              services = [
+                  'payments-core', 'auth-gateway', 'reporting-engine', 'alert-orchestrator', 'data-collector'
+              ]
+              levels = ['INFO', 'WARN', 'ERROR']
+              templates = {
+                  'INFO': ['Heartbeat received', 'Cache refresh complete', 'Synthetic sync processed'],
+                  'WARN': ['Latency spike from {service}', 'Retry scheduled by orchestrator'],
+                  'ERROR': ['Workflow timeout hit on {service}', 'Synthetic incident fired']
+              }
+
+              window = int('{{ inputs.window }}')
+              events_per_minute = 12
+              now = datetime.utcnow()
+              logs = []
+              for _ in range(window * events_per_minute):
+                  service = random.choice(services)
+                  level = random.choices(levels, weights=[0.6, 0.25, 0.15])[0]
+                  message = random.choice(templates[level]).replace('{service}', service)
+                  skew_seconds = random.randint(0, window * 60)
+                  timestamp = (now - timedelta(seconds=skew_seconds)).isoformat() + 'Z'
+                  logs.append({
+                      'timestamp': timestamp,
+                      'service': service,
+                      'level': level,
+                      'message': message
+                  })
+
+              payload = {
+                  'logs': sorted(logs, key=lambda item: item['timestamp']),
+                  'rangeMinutes': window
+              }
+
+              print(json.dumps(payload))
+
+          - id: summarize_with_agent
+            type: io.kestra.plugin.ai.agents.OpenAIAgent
+            description: Kestra AI agent turns raw logs into a narrative summary.
+            from: kestra-open-source
+            inputs:
+              system: |
+                You are the LogSense AI agent summarizing synthetic observability data.
+                - Summarize what happened.
+                - Highlight affected services.
+                - Comment on severity.
+                - Recommend Escalate vs Monitor.
+              user: |
+                Logs JSON:
+                {{ outputs.generate_logs.stdout }}
+
+          - id: decide_next_step
+            type: io.kestra.plugin.core.script.Python
+            description: Applies deterministic rule on error counts to mirror frontend logic.
+            script: |
+              import json
+
+              payload = json.loads("""{{ outputs.generate_logs.stdout }}""")
+              error_count = len([log for log in payload['logs'] if log['level'] == 'ERROR'])
+              threshold = max(4, round(payload['rangeMinutes'] * float('{{ vars.error_threshold_base }}')))
+              decision = 'Escalate' if error_count > threshold else 'Monitor'
+
+              print(json.dumps({
+                  'rangeMinutes': payload['rangeMinutes'],
+                  'errorCount': error_count,
+                  'threshold': threshold,
+                  'decision': decision
+              }))
+
+          - id: respond_to_frontend
+            type: io.kestra.plugin.core.debug.Return
+            format: |
+              {
+                "rangeMinutes": {{ outputs.decide_next_step.json().rangeMinutes }},
+                "totalLogs": {{ outputs.generate_logs.stdout | fromJson | get('logs') | size }},
+                "decision": "{{ outputs.decide_next_step.json().decision }}",
+                "threshold": {{ outputs.decide_next_step.json().threshold }},
+                "summary": {{ outputs.summarize_with_agent.choices[0].message.content | toJson }},
+                "rawLogs": {{ outputs.generate_logs.stdout }}
+              }
+    default:
+      - id: invalid_range
+        type: io.kestra.plugin.core.debug.Return
+        format: "Unsupported window {{ inputs.window }}. Allowed: {{ vars.allowed_windows }}"
