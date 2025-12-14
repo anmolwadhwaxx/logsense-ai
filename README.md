@@ -1,88 +1,144 @@
 # LogSense AI
 
-Public, hackathon-safe incident intelligence powered by synthetic logs, Next.js, and Kestra autonomous agents.
+**Public, hackathon-safe incident intelligence powered by synthetic logs, AI agents, and workflow orchestration.**
 
-> This project was built entirely during a hackathon using synthetic datasets and public tools. It is inspired by real-world engineering challenges but contains no proprietary systems, code, or data.
+LogSense AI helps teams move from noisy telemetry to clear decisions using **synthetic data only**, making it ideal for global hackathons and demos without compliance or privacy risks.
 
-## Problem Statement
+> This project was built entirely during a hackathon using synthetic datasets and public tools.  
+> It is inspired by real-world engineering challenges but contains **no proprietary systems, code, or data**.
 
-Operators need AI assistance to summarize noisy telemetry, flag risky clusters, and recommend the next action without touching sensitive production environments. LogSense AI rebuilds that experience with fully mocked data so teams can prototype, demo, and submit to global hackathons without compliance blockers.
+---
 
-## Architecture
+## 🧠 Problem Statement
 
-| Layer | Tech | Notes |
-| --- | --- | --- |
-| Frontend | Next.js (App Router) | Minimal UI with a dropdown, "Analyze last 10 minutes" CTA, and live metrics. Optimized for Vercel preview deployments. |
-| API Route | `/api/analyze` | Calls the synthetic generator in `lib/syntheticLogs.ts`, derives summaries, and mirrors the Kestra contract. |
-| Synthetic Generator | `lib/syntheticLogs.ts` | Creates timestamped JSON logs with service, level, and message fields. No external data sources. |
-| Workflow Orchestration | `kestra/logsense-ai.yaml` | Demonstrates how Kestra ingests synthetic logs, invokes its AI Agent, applies routing rules, and emits the frontend payload. |
-| Collaboration | `workflows/api-contract.md` | Maintains the schema shared by both the Next.js API and the Kestra workflow. |
+During incidents, operators face thousands of log lines across services with little context.
+They need fast answers to three questions:
 
+1. What happened?
+2. Which services are affected?
+3. Should we escalate or monitor?
+
+LogSense AI rebuilds this experience using **fully mocked telemetry** and **AI agents**, allowing teams to prototype, demo, and submit incident-intelligence systems safely in public hackathons.
+
+---
+
+## 🏗️ Architecture Overview
+
+| Layer | Technology | Description |
+|-------|-----------|-------------|
+| Frontend | Next.js (App Router) | Minimal UI with a time-range dropdown, **Analyze last 10 minutes** CTA, and result cards. Optimized for Vercel deployment. |
+| API Layer | `/api/analyze` | Local API that synthesizes logs, derives insights, and mirrors Kestra workflow output. |
+| Synthetic Data | `lib/syntheticLogs.ts` | Deterministic generator producing timestamped JSON logs with service, level, and message fields. |
+| Workflow Orchestration | Kestra | Workflow demonstrates ingestion, AI summarization, decision rules, and structured output. |
+| Contract | `workflows/api-contract.md` | Shared schema between the Next.js API and the Kestra workflow. |
+
+---
+
+## 📁 Repository Structure
 ```
 .
 ├── app
-│   ├── api/analyze/route.ts       # Mocked API that mirrors the Kestra workflow output
-│   ├── layout.tsx                 # Root layout and metadata
-│   ├── page.tsx                   # UI + interactions
-│   └── globals.css                # Minimal styling
+│   ├── api/analyze/route.ts     # Mocked API mirroring Kestra workflow output
+│   ├── layout.tsx                # Root layout and metadata
+│   ├── page.tsx                  # UI and interactions
+│   └── globals.css               # Minimal styling
 ├── lib
-│   └── syntheticLogs.ts           # Synthetic log generator + AI-style summarizer
+│   └── syntheticLogs.ts          # Synthetic log generator and analyzer
 ├── workflows
-│   └── api-contract.md            # Request / response contract
+│   └── api-contract.md           # Request / response contract
 ├── kestra
-│   └── logsense-ai.yaml           # Kestra workflow for Wakanda Data Award submissions
+│   └── logsense-ai.yaml          # Kestra workflow for Wakanda Data Award
 └── README.md
 ```
 
-## Getting Started
+---
 
-1. Install dependencies with `npm install`.
-2. Run the playground locally via `npm run dev` and open `http://localhost:3000`.
-3. Click **Analyze last 10 minutes** (or choose a range from the dropdown). The UI will call `/api/analyze`, which synthesizes logs, derives AI summaries, and renders the decision badge.
+## 🚀 Getting Started
+```bash
+npm install
+npm run dev
+```
 
-When deploying to Vercel (Stormbreaker Deployment Award), no environment variables are required because the dataset is generated in-memory.
+Open `http://localhost:3000` and:
 
-## Synthetic Log Generator
+1. Select a time window (5, 10, or 30 minutes)
+2. Click **Analyze last 10 minutes**
+3. View:
+   - Total log count
+   - AI-generated summary
+   - Agent decision (Escalate or Monitor)
 
-The generator (`lib/syntheticLogs.ts`) produces deterministic JSON entries containing:
+For Vercel deployment (Stormbreaker Deployment Award), no environment variables are required.
 
-- `timestamp`: ISO string for the last N minutes
-- `service`: One of five mocked microservices
-- `level`: `INFO`, `WARN`, or `ERROR` with weighted probabilities
-- `message`: Short narrative string with placeholders for counts and milliseconds
+---
 
-`analyzeSyntheticLogs(range)` aggregates those entries, computes per-service stats, determines whether to escalate (error count > `0.6 * minutes`), and writes the same structure the workflow uses. Highlights and recommendations mimic Kestra's AI Agent behavior without calling real models.
+## 🧪 Synthetic Log Generator
 
-## Kestra Workflow
+The synthetic generator (`lib/syntheticLogs.ts`) creates JSON logs containing:
 
-`kestra/logsense-ai.yaml` shows how to reproduce the exact payload inside Kestra:
+- **timestamp** – ISO timestamp within the selected window
+- **service** – One of five mocked microservices
+- **level** – INFO, WARN, or ERROR (weighted)
+- **message** – Short narrative string
 
-1. **`generate_logs`**: Python task that emits the same JSON shape created locally.
-2. **`summarize_with_agent`**: Uses Kestra's AI Agent plugin with safe instructions to summarize the logs.
-3. **`decide_next_step`**: Scripts the deterministic rule (error threshold vs. range).
-4. **`respond_to_frontend`**: Outputs JSON that the Next.js UI can consume directly.
+`analyzeSyntheticLogs(window)`:
 
-Trigger the workflow with an input (`window = 5 | 10 | 30`) to keep parity with the frontend dropdown.
+- Aggregates per-service statistics
+- Counts error events
+- Applies a deterministic escalation rule  
+  `(errorCount > 0.6 × minutes)`
+- Produces the same structured payload used by the workflow
 
-## API Contract
+This mirrors AI-agent behavior without calling real models or systems.
 
-The `/api/analyze` route and Kestra workflow both follow `workflows/api-contract.md`. This keeps autonomous agents, local mocks, and Vercel deployments aligned.
+---
 
-## Sponsor Alignment
+## 🤖 Kestra Workflow (Wakanda Data Award)
 
-1. **Kestra (Wakanda Data Award)** – Workflow YAML demonstrates AI Agent usage, deterministic decisions, and synthetic ingestion.
-2. **Vercel (Stormbreaker Deployment Award)** – Frontend is a single Next.js app that deploys without secrets or persistent storage.
-3. **CodeRabbit (Captain Code Award)** – Repository is lint-friendly TypeScript with explicit contracts, making automated PR reviews straightforward.
-4. **Optional: Cline CLI (Infinity Build Award)** – The API contract and Kestra workflow make it trivial for agentic CLIs to plug into the same interface.
+The workflow in `kestra/logsense-ai.yaml` demonstrates:
 
-## Security & Compliance
+1. **generate_logs**  
+   Python task that emits synthetic logs in JSON format
 
-- 100% synthetic, in-memory data; no credentials, SSO flows, or production logs.
-- No storage layer; each analysis is ephemeral and discarded after responding.
-- No references to real customers, companies, or proprietary APIs.
+2. **summarize_with_agent**  
+   Kestra AI Agent summarizes events, affected services, and severity
 
-## Next Steps
+3. **decide_next_step**  
+   Rule-based logic determines Escalate vs Monitor
 
-- Wire the Kestra workflow output to a hosted endpoint when running inside a Kestra Cloud project.
-- Add visualization components (mini charts) if you want extra polish for demo day.
-- Integrate CodeRabbit CI to auto-review pull requests and capture the Captain Code Award.
+4. **respond_to_frontend**  
+   Returns structured JSON consumed directly by the UI
+
+The workflow accepts `window = 5 | 10 | 30`, keeping parity with the frontend dropdown.
+
+---
+
+## 🔗 API Contract
+
+Both the `/api/analyze` route and the Kestra workflow follow the same contract defined in:
+
+**`workflows/api-contract.md`**
+
+This keeps local mocks, autonomous agents, and deployed demos fully aligned.
+
+---
+
+## 🏆 Sponsor Alignment (WeMakeDevs)
+
+**Kestra – Wakanda Data Award**  
+Demonstrates AI Agent summarization, decision-making, and workflow orchestration on synthetic data.
+
+**Vercel – Stormbreaker Deployment Award**  
+Single Next.js application, zero secrets, production-ready UX.
+
+**CodeRabbit – Captain Code Award**  
+Clean TypeScript, explicit contracts, and PR-friendly structure for automated code reviews.
+
+---
+
+## 🔐 Security & Compliance
+
+- ✅ 100% synthetic, in-memory data
+- ✅ No credentials, SSO, or production logs
+- ✅ No persistence or storage layer
+- ✅ No references to real companies or customers
