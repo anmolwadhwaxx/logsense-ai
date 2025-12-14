@@ -68,6 +68,10 @@ Trigger the workflow with an input (`window = 5 | 10 | 30`) to keep parity with 
 
 The `/api/analyze` route and Kestra workflow both follow `workflows/api-contract.md`. This keeps autonomous agents, local mocks, and Vercel deployments aligned.
 
+The live demo is deployed on Vercel and uses a mocked API that mirrors
+the Kestra workflow output to ensure deterministic, hackathon-safe behavior.
+
+
 ## Sponsor Alignment
 
 1. **Kestra (Wakanda Data Award)** – Workflow YAML demonstrates AI Agent usage, deterministic decisions, and synthetic ingestion.
