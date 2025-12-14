@@ -125,6 +125,11 @@ This keeps local mocks, autonomous agents, and deployed demos fully aligned.
 
 ## 🏆 Sponsor Alignment (WeMakeDevs)
 
+The live demo is deployed on Vercel and uses a mocked API that mirrors
+the Kestra workflow output to ensure deterministic, hackathon-safe behavior.
+
+
+## Sponsor Alignment
 **Kestra – Wakanda Data Award**  
 Demonstrates AI Agent summarization, decision-making, and workflow orchestration on synthetic data.
 
